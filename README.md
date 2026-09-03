@@ -272,6 +272,8 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 
 Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可以按平台规则复制到命令目录。其他 Agent 可以复用同一 CLI/JSON 合约，实现自己的薄适配器，不需要重新实现状态逻辑。
 
+协议版本、组件兼容关系、升级/回滚步骤以及真实 Windows/Agent/用户验收模板见 [`docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md`](docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md)。
+
 ## 环境变量
 
 常用覆盖项：
