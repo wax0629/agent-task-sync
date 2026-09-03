@@ -1,70 +1,500 @@
 #!/usr/bin/env node
-import { ApplicationService, ConfirmationRequiredError } from "@agent-task-sync/application";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
+import {
+  ApplicationService,
+  ConfirmationRequiredError,
+  type CheckpointInput,
+  type HandoffInput,
+  type ProjectStatus
+} from "@agent-task-sync/application";
+import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
+import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
 import { ExitCode } from "./exit-codes.js";
-import { formatContext, formatStatus } from "./format.js";
+import { formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList } from "./format.js";
 import { createRuntime } from "./runtime.js";
 
 interface ParsedArgs {
   command?: string;
   args: string[];
+  options: Map<string, string[]>;
   json: boolean;
   format?: "markdown" | "json";
 }
 
+class CliInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CliInputError";
+  }
+}
+
+class UninitializedError extends Error {
+  constructor() {
+    super("项目尚未初始化，请先运行 task-sync init。");
+    this.name = "UninitializedError";
+  }
+}
+
 function parseArgs(argv: readonly string[]): ParsedArgs {
-  const values = [...argv];
-  const json = values.includes("--json");
-  const formatIndex = values.indexOf("--format");
-  const formatValue = formatIndex >= 0 ? values[formatIndex + 1] : undefined;
-  if (formatValue && formatValue !== "markdown" && formatValue !== "json") throw new Error("--format must be markdown or json");
-  const filtered = values.filter((value, index) => {
-    if (value === "--json") return false;
-    if (formatIndex >= 0 && (index === formatIndex || index === formatIndex + 1)) return false;
-    return true;
+  const args: string[] = [];
+  const options = new Map<string, string[]>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (!value.startsWith("--")) {
+      args.push(value);
+      continue;
+    }
+    const raw = value.slice(2);
+    if (!raw) throw new CliInputError("不支持空选项。");
+    const separator = raw.indexOf("=");
+    const name = separator >= 0 ? raw.slice(0, separator) : raw;
+    let optionValue = separator >= 0 ? raw.slice(separator + 1) : "true";
+    if (separator < 0 && argv[index + 1] && !argv[index + 1].startsWith("--")) {
+      optionValue = argv[index + 1];
+      index += 1;
+    }
+    const values = options.get(name) ?? [];
+    values.push(optionValue);
+    options.set(name, values);
+  }
+  const format = option(options, "format");
+  if (format !== undefined && format !== "markdown" && format !== "json") {
+    throw new CliInputError("--format 只能是 markdown 或 json。");
+  }
+  return {
+    command: args[0],
+    args: args.slice(1),
+    options,
+    json: hasOption(options, "json"),
+    format: format as ParsedArgs["format"]
+  };
+}
+
+function option(options: Map<string, string[]>, name: string): string | undefined {
+  const values = options.get(name);
+  return values?.[values.length - 1];
+}
+
+function hasOption(options: Map<string, string[]>, name: string): boolean {
+  return options.has(name);
+}
+
+function isEnabled(options: Map<string, string[]>, name: string): boolean {
+  return option(options, name) === "true";
+}
+
+function optionValues(options: Map<string, string[]>, ...names: string[]): string[] {
+  return names.flatMap((name) => options.get(name) ?? []);
+}
+
+function ensureAllowed(parsed: ParsedArgs, names: readonly string[]): void {
+  const allowed = new Set(["json", "format", ...names]);
+  for (const name of parsed.options.keys()) {
+    if (!allowed.has(name)) throw new CliInputError(`不支持选项：--${name}`);
+  }
+}
+
+function required(value: string | undefined, label: string): string {
+  if (!value?.trim()) throw new CliInputError(`缺少${label}。`);
+  return value.trim();
+}
+
+function requireYes(parsed: ParsedArgs): void {
+  if (!isEnabled(parsed.options, "yes")) throw new CliInputError("写入操作需要显式确认，请添加 --yes。");
+}
+
+function statusValue(value: string | undefined): TaskStatus | undefined {
+  if (value === undefined) return undefined;
+  const allowed: TaskStatus[] = ["planned", "in_progress", "blocked", "needs_review", "handoff_ready", "completed", "archived"];
+  if (!allowed.includes(value as TaskStatus)) throw new CliInputError(`无效任务状态：${value}`);
+  return value as TaskStatus;
+}
+
+function parseJsonValue(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new CliInputError(`${label} 不是有效 JSON：${(error as Error).message}`);
+  }
+}
+
+function stringList(value: unknown, label: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value.trim() ? [value] : [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new CliInputError(`${label} 必须是字符串数组。`);
+  return value.map((item) => item.trim()).filter(Boolean);
+}
+
+function optionList(parsed: ParsedArgs, names: string[]): string[] | undefined {
+  const values = optionValues(parsed.options, ...names);
+  return values.length ? values : undefined;
+}
+
+function mergeList(input: unknown, cli: string[] | undefined, label: string): string[] | undefined {
+  if (cli !== undefined) return cli.map((value) => value.trim()).filter(Boolean);
+  return stringList(input, label);
+}
+
+function objectInput(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliInputError(`${label} 必须是 JSON 对象。`);
+  return value as Record<string, unknown>;
+}
+
+async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+  const text = path === "-" ? await readStdin() : await readFile(resolve(path), "utf8");
+  return objectInput(parseJsonValue(text, path), path);
+}
+
+async function readStdin(): Promise<string> {
+  let text = "";
+  for await (const chunk of process.stdin) text += chunk.toString();
+  return text;
+}
+
+function inputString(input: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") throw new CliInputError(`${key} 必须是字符串。`);
+    return value;
+  }
+  return undefined;
+}
+
+function inputValue(input: Record<string, unknown>, ...keys: string[]): unknown {
+  return keys.map((key) => input[key]).find((value) => value !== undefined);
+}
+
+function normalizeVerification(value: unknown, label: string): VerificationResult[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new CliInputError(`${label} 必须是数组。`);
+  return value.map((item, index) => {
+    const record = objectInput(item, `${label}[${index}]`);
+    const command = required(typeof record.command === "string" ? record.command : undefined, `${label}[${index}].command`);
+    const result = typeof record.result === "string" ? record.result : "";
+    const status = record.status;
+    if (status !== "passed" && status !== "failed" && status !== "skipped") throw new CliInputError(`${label}[${index}].status 无效。`);
+    return {
+      id: typeof record.id === "string" && record.id.trim() ? record.id : `verification-input-${index + 1}`,
+      command,
+      result,
+      status,
+      checkedAt: typeof record.checkedAt === "string" ? record.checkedAt : new Date().toISOString()
+    };
   });
-  return { command: filtered[0], args: filtered.slice(1), json, format: formatValue as ParsedArgs["format"] };
+}
+
+function normalizeCriteria(values: string[] | undefined): AcceptanceCriterion[] | undefined {
+  return values?.map((text, index) => ({ id: `criterion-${index + 1}`, text, completed: false }));
+}
+
+function normalizeInputCriteria(value: unknown): AcceptanceCriterion[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return normalizeCriteria(stringList(value, "acceptanceCriteria"));
+  if (value.every((item) => typeof item === "string")) return normalizeCriteria(value as string[]);
+  return value.map((item, index) => {
+    const record = objectInput(item, `acceptanceCriteria[${index}]`);
+    return {
+      id: required(typeof record.id === "string" ? record.id : undefined, `acceptanceCriteria[${index}].id`),
+      text: required(typeof record.text === "string" ? record.text : undefined, `acceptanceCriteria[${index}].text`),
+      completed: typeof record.completed === "boolean" ? record.completed : false
+    };
+  });
+}
+
+function normalizePhases(value: unknown): PhaseState[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new CliInputError("phases 必须是数组。");
+  return value.map((item, index) => {
+    const record = objectInput(item, `phases[${index}]`);
+    const phaseStatus = record.status;
+    if (phaseStatus !== undefined && phaseStatus !== "planned" && phaseStatus !== "in_progress" && phaseStatus !== "blocked" && phaseStatus !== "completed") {
+      throw new CliInputError(`phases[${index}].status 无效。`);
+    }
+    return {
+      id: required(typeof record.id === "string" ? record.id : undefined, `phases[${index}].id`),
+      order: typeof record.order === "number" ? record.order : index + 1,
+      title: required(typeof record.title === "string" ? record.title : undefined, `phases[${index}].title`),
+      status: phaseStatus ?? "planned",
+      goal: typeof record.goal === "string" ? record.goal : undefined,
+      criteria: typeof record.criteria === "string" ? record.criteria : undefined
+    };
+  });
+}
+
+function currentTaskPath(root: string): string {
+  return join(root, "current-task");
+}
+
+async function saveCurrentTask(root: string, taskId: string): Promise<void> {
+  await mkdir(root, { recursive: true });
+  await writeFile(currentTaskPath(root), `${taskId}\n`, "utf8");
+}
+
+async function loadCurrentTask(root: string): Promise<string | undefined> {
+  try {
+    const value = (await readFile(currentTaskPath(root), "utf8")).trim();
+    return value || undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 function print(value: unknown, json: boolean, text: string): void {
   process.stdout.write(json ? `${JSON.stringify(value, null, 2)}\n` : `${text}\n`);
 }
 
+async function requireProject(app: ApplicationService): Promise<ProjectStatus> {
+  const status = await app.status();
+  if (!status.project) throw new UninitializedError();
+  return status;
+}
+
+function taskIdFrom(parsed: ParsedArgs, input: Record<string, unknown> = {}, positionalIndex = 0): string {
+  return required(option(parsed.options, "task") ?? parsed.args[positionalIndex] ?? inputString(input, "taskId", "task_id"), "任务 ID");
+}
+
+async function runTaskCreate(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "project", "title", "goal", "background", "acceptance", "phases", "status", "input", "task"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  const projectStatus = await requireProject(runtime.app);
+  const projectId = required(option(parsed.options, "project") ?? inputString(input, "projectId", "project_id") ?? projectStatus.project?.projectId, "项目 ID");
+  const taskId = required(parsed.args[0] ?? option(parsed.options, "task") ?? inputString(input, "taskId", "task_id"), "任务 ID");
+  const title = required(parsed.args[1] ?? option(parsed.options, "title") ?? inputString(input, "title"), "任务标题");
+  const goal = required(option(parsed.options, "goal") ?? inputString(input, "goal"), "任务目标");
+  const acceptanceValue = optionList(parsed, ["acceptance"]);
+  const acceptanceCriteria = acceptanceValue
+    ? normalizeCriteria(acceptanceValue)
+    : normalizeInputCriteria(inputValue(input, "acceptanceCriteria", "acceptance_criteria"));
+  const phases = option(parsed.options, "phases") ? normalizePhases(parseJsonValue(required(option(parsed.options, "phases"), "phases"), "phases")) : normalizePhases(inputValue(input, "phases"));
+  const state = await runtime.app.createTask({
+    projectId,
+    taskId,
+    title,
+    goal,
+    background: option(parsed.options, "background") ?? inputString(input, "background"),
+    acceptanceCriteria,
+    phases,
+    status: statusValue(option(parsed.options, "status") ?? inputString(input, "status")),
+    confirmed: true
+  }, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, state.id);
+  print(state, parsed.json, formatTask(state));
+  return ExitCode.ok;
+}
+
+async function runTaskUse(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "phase", "release"]);
+  requireYes(parsed);
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed);
+  const state = await runtime.app.claimTask({
+    taskId,
+    phaseId: option(parsed.options, "phase"),
+    released: isEnabled(parsed.options, "release"),
+    confirmed: true
+  }, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, `已选择任务：${state.title}`);
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runCheckpoint(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "summary", "current-focus", "recent-completed", "next-action", "clear-next-action", "file", "files", "commit", "verification", "uncommitted-change", "uncommitted", "status"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const files = optionList(parsed, ["file", "files"]);
+  const uncommitted = optionList(parsed, ["uncommitted-change", "uncommitted"]);
+  const verificationInput = option(parsed.options, "verification")
+    ? parseJsonValue(required(option(parsed.options, "verification"), "verification"), "verification")
+    : inputValue(input, "verification");
+  const nextActionInput = inputValue(input, "nextAction", "next_action");
+  if (nextActionInput !== undefined && nextActionInput !== null && typeof nextActionInput !== "string") throw new CliInputError("nextAction 必须是字符串或 null。");
+  const checkpoint: CheckpointInput = {
+    taskId,
+    summary: option(parsed.options, "summary") ?? inputString(input, "summary"),
+    currentFocus: option(parsed.options, "current-focus") ?? inputString(input, "currentFocus", "current_focus"),
+    recentCompleted: mergeList(inputValue(input, "recentCompleted", "recent_completed"), optionList(parsed, ["recent-completed"]), "recentCompleted"),
+    nextAction: hasOption(parsed.options, "clear-next-action") ? null : option(parsed.options, "next-action") ?? nextActionInput,
+    filesChanged: mergeList(inputValue(input, "filesChanged", "files_changed"), files, "filesChanged"),
+    commit: option(parsed.options, "commit") ?? inputString(input, "commit"),
+    verification: normalizeVerification(verificationInput, "verification"),
+    uncommittedChanges: mergeList(inputValue(input, "uncommittedChanges", "uncommitted_changes"), uncommitted, "uncommittedChanges"),
+    status: statusValue(option(parsed.options, "status") ?? inputString(input, "status")),
+    confirmed: true
+  };
+  const state = await runtime.app.recordCheckpoint(checkpoint, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+function decisionList(value: unknown, label: string): Array<{ decision: string; reason?: string }> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new CliInputError(`${label} 必须是数组。`);
+  return value.map((item, index) => {
+    const record = objectInput(item, `${label}[${index}]`);
+    return {
+      decision: required(typeof record.decision === "string" ? record.decision : undefined, `${label}[${index}].decision`),
+      reason: typeof record.reason === "string" ? record.reason : undefined
+    };
+  });
+}
+
+function errorList(value: unknown, label: string): Array<{ error: string; attempts?: string }> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new CliInputError(`${label} 必须是数组。`);
+  return value.map((item, index) => {
+    const record = objectInput(item, `${label}[${index}]`);
+    return {
+      error: required(typeof record.error === "string" ? record.error : undefined, `${label}[${index}].error`),
+      attempts: typeof record.attempts === "string" ? record.attempts : undefined
+    };
+  });
+}
+
+async function runHandoffCreate(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "handoff-id", "completed", "incomplete", "next-step", "file", "files", "test-summary", "target-agent", "decisions", "errors"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const decisions = option(parsed.options, "decisions") ? decisionList(parseJsonValue(required(option(parsed.options, "decisions"), "decisions"), "decisions"), "decisions") : decisionList(inputValue(input, "keyDecisions", "key_decisions"), "keyDecisions");
+  const errors = option(parsed.options, "errors") ? errorList(parseJsonValue(required(option(parsed.options, "errors"), "errors"), "errors"), "errors") : errorList(inputValue(input, "knownErrors", "known_errors"), "knownErrors");
+  const nextStepInput = inputValue(input, "nextStep", "next_step");
+  if (nextStepInput !== undefined && nextStepInput !== null && typeof nextStepInput !== "string") throw new CliInputError("nextStep 必须是字符串或 null。");
+  const handoff: HandoffInput = {
+    taskId,
+    handoffId: option(parsed.options, "handoff-id") ?? inputString(input, "handoffId", "handoff_id"),
+    completedWork: mergeList(inputValue(input, "completedWork", "completed_work"), optionList(parsed, ["completed"]), "completedWork"),
+    incompleteWork: mergeList(inputValue(input, "incompleteWork", "incomplete_work"), optionList(parsed, ["incomplete"]), "incompleteWork"),
+    keyDecisions: decisions,
+    knownErrors: errors,
+    nextStep: option(parsed.options, "next-step") ?? nextStepInput,
+    relevantFiles: mergeList(inputValue(input, "relevantFiles", "relevant_files"), optionList(parsed, ["file", "files"]), "relevantFiles"),
+    testSummary: option(parsed.options, "test-summary") ?? inputString(input, "testSummary", "test_summary"),
+    targetAgent: option(parsed.options, "target-agent") ?? inputString(input, "targetAgent", "target_agent"),
+    confirmed: true
+  };
+  const state = await runtime.app.createHandoff(handoff, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runHandoffAccept(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "handoff-id"]);
+  requireYes(parsed);
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed);
+  const handoffId = required(option(parsed.options, "handoff-id") ?? parsed.args[1], "Handoff ID");
+  const state = await runtime.app.acceptHandoff({ taskId, handoffId, confirmed: true }, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runCommand(argv: readonly string[], cwd: string): Promise<number> {
+  const parsed = parseArgs(argv);
+  const runtime = createRuntime(cwd);
+  if (parsed.command === "init") {
+    ensureAllowed(parsed, ["project", "name", "remote", "default-branch"]);
+    if (parsed.args.length > 2) throw new CliInputError("usage: task-sync init [project-id] [project-name]");
+    const projectId = required(parsed.args[0] ?? option(parsed.options, "project") ?? basename(cwd), "项目 ID");
+    const name = parsed.args[1] ?? option(parsed.options, "name") ?? projectId;
+    const project = await runtime.app.init({
+      projectId,
+      name,
+      rootPath: cwd,
+      remoteUrl: option(parsed.options, "remote"),
+      defaultBranch: option(parsed.options, "default-branch") ?? "main"
+    });
+    print(project, parsed.json, `已初始化项目：${project.name}`);
+    return ExitCode.ok;
+  }
+  if (parsed.command === "status") {
+    ensureAllowed(parsed, []);
+    const status = await runtime.app.status();
+    if (!status.project) {
+      print(status, parsed.json, formatStatus(status));
+      return ExitCode.uninitialized;
+    }
+    print(status, parsed.json, formatStatus(status));
+    return status.sync.conflict ? ExitCode.conflict : status.sync.remoteAhead ? ExitCode.needsSync : ExitCode.ok;
+  }
+  if (parsed.command === "doctor") {
+    ensureAllowed(parsed, []);
+    const status = await runtime.app.status();
+    print({ ok: Boolean(status.project), root: runtime.root }, parsed.json, status.project ? `状态目录正常：${runtime.root}` : "尚未初始化");
+    return status.project ? ExitCode.ok : ExitCode.uninitialized;
+  }
+  if (parsed.command === "task") {
+    const subcommand = parsed.args[0];
+    const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
+    if (subcommand === "create") return runTaskCreate(nested, runtime);
+    if (subcommand === "list") {
+      ensureAllowed(nested, []);
+      const status = await requireProject(runtime.app);
+      print(status.tasks, nested.json, formatTaskList(status.tasks));
+      return status.tasks.some((task) => task.conflicts.some((conflict) => !conflict.resolved)) ? ExitCode.conflict : ExitCode.ok;
+    }
+    if (subcommand === "use") return runTaskUse(nested, runtime);
+    throw new CliInputError("usage: task-sync task create|list|use");
+  }
+  if (parsed.command === "context") {
+    ensureAllowed(parsed, ["task"]);
+    const taskId = required(option(parsed.options, "task") ?? parsed.args[0] ?? await loadCurrentTask(runtime.root), "任务 ID");
+    await requireProject(runtime.app);
+    const context = await runtime.app.getContext(taskId);
+    if (parsed.format === "json" || parsed.json) print(context, true, "");
+    else print(context, false, formatContext(context));
+    return context.task.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : context.warning ? ExitCode.needsSync : ExitCode.ok;
+  }
+  if (parsed.command === "checkpoint") return runCheckpoint(parsed, runtime);
+  if (parsed.command === "handoff") {
+    const subcommand = parsed.args[0];
+    const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
+    if (subcommand === "create") return runHandoffCreate(nested, runtime);
+    if (subcommand === "accept") return runHandoffAccept(nested, runtime);
+    throw new CliInputError("usage: task-sync handoff create|accept");
+  }
+  if (parsed.command === "rebuild") {
+    ensureAllowed(parsed, ["task"]);
+    await requireProject(runtime.app);
+    const result = await runtime.app.rebuild(option(parsed.options, "task") ?? parsed.args[0]);
+    print(result, parsed.json, formatRebuild(result));
+    return result.states.some((state) => state.conflicts.some((conflict) => !conflict.resolved)) ? ExitCode.conflict : ExitCode.ok;
+  }
+  if (parsed.command === "sync") {
+    ensureAllowed(parsed, []);
+    await requireProject(runtime.app);
+    const result = await runtime.app.sync();
+    print(result, parsed.json, formatSync(result));
+    return result.inspection.conflict ? ExitCode.conflict : ExitCode.ok;
+  }
+  throw new CliInputError("usage: task-sync init|status|task|context|checkpoint|handoff|rebuild|sync|doctor");
+}
+
+function errorCode(error: unknown): number {
+  if (error instanceof UninitializedError) return ExitCode.uninitialized;
+  if (error instanceof GitTextConflictError) return ExitCode.conflict;
+  if (error instanceof NoRemoteError || error instanceof GitSyncError) return ExitCode.gitFailure;
+  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError) return ExitCode.invalidInput;
+  if (error instanceof Error && /unsupported project protocol|protocol version/i.test(error.message)) return ExitCode.incompatible;
+  return ExitCode.unexpected;
+}
+
 export async function run(argv: readonly string[], cwd = process.cwd()): Promise<number> {
   try {
-    const parsed = parseArgs(argv);
-    const runtime = createRuntime(cwd);
-    const command = parsed.command;
-    if (command === "init") {
-      if (parsed.args.length < 1 || parsed.args.length > 2) throw new Error("usage: task-sync init <project-id> [project-name]");
-      const projectId = parsed.args[0];
-      const name = parsed.args[1] ?? projectId;
-      const project = await runtime.app.init({ projectId, name, rootPath: cwd, defaultBranch: "main" });
-      print(project, parsed.json, `已初始化项目：${project.name}`);
-      return ExitCode.ok;
-    }
-    if (command === "status") {
-      const status = await runtime.app.status();
-      if (!status.project) return ExitCode.uninitialized;
-      print(status, parsed.json, formatStatus(status));
-      return status.sync.conflict ? ExitCode.conflict : status.sync.remoteAhead ? ExitCode.needsSync : ExitCode.ok;
-    }
-    if (command === "context") {
-      if (parsed.args.length !== 1) throw new Error("usage: task-sync context <task-id> [--format markdown|json]");
-      const context = await runtime.app.getContext(parsed.args[0]);
-      if (parsed.format === "json" || parsed.json) print(context, true, "");
-      else print(context, false, formatContext(context));
-      return context.warning ? ExitCode.needsSync : ExitCode.ok;
-    }
-    if (command === "doctor") {
-      const status = await runtime.app.status();
-      print({ ok: Boolean(status.project), root: runtime.root }, parsed.json, status.project ? `状态目录正常：${runtime.root}` : "尚未初始化");
-      return status.project ? ExitCode.ok : ExitCode.uninitialized;
-    }
-    throw new Error("usage: task-sync init|status|context|doctor");
+    return await runCommand(argv, cwd);
   } catch (error) {
-    const code = error instanceof ConfirmationRequiredError ? ExitCode.invalidInput : ExitCode.invalidInput;
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    return code;
+    return errorCode(error);
   }
 }
 

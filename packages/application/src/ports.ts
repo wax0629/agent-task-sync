@@ -89,6 +89,13 @@ export interface CreateTaskInput {
   confirmed?: boolean;
 }
 
+export interface ClaimTaskInput {
+  taskId: string;
+  phaseId?: string;
+  released?: boolean;
+  confirmed?: boolean;
+}
+
 export interface CheckpointInput {
   taskId: string;
   summary?: string;
@@ -152,6 +159,7 @@ export interface TaskSyncService {
   init(input: InitProjectInput): Promise<ProjectInfo>;
   status(): Promise<ProjectStatus>;
   createTask(input: CreateTaskInput, actor: Actor): Promise<TaskState>;
+  claimTask(input: ClaimTaskInput, actor: Actor): Promise<TaskState>;
   recordCheckpoint(input: CheckpointInput, actor: Actor): Promise<TaskState>;
   createHandoff(input: HandoffInput, actor: Actor): Promise<TaskState>;
   acceptHandoff(input: AcceptHandoffInput, actor: Actor): Promise<TaskState>;

@@ -5,6 +5,7 @@ import {
   type EventPayload,
   type HandoffAcceptedPayload,
   type HandoffCreatedPayload,
+  type TaskClaimedPayload,
   type TaskCreatedPayload,
   type TaskEvent,
   type TaskState
@@ -13,6 +14,7 @@ import type {
   AcceptHandoffInput,
   Actor,
   CheckpointInput,
+  ClaimTaskInput,
   ContinuationContext,
   CreateTaskInput,
   EventStore,
@@ -80,6 +82,21 @@ export class ApplicationService implements TaskSyncService {
     };
     const event = this.makeEvent(input.projectId, input.taskId, "task_created", payload, actor, []);
     await this.dependencies.events.append(event);
+    return this.rebuildOne(input.taskId);
+  }
+
+  async claimTask(input: ClaimTaskInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: TaskClaimedPayload = {
+      agentId: actor.agentId,
+      deviceId: actor.deviceId,
+      sessionId: actor.sessionId,
+      phaseId: input.phaseId,
+      released: input.released
+    };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_claimed", payload, actor, this.heads(events)));
     return this.rebuildOne(input.taskId);
   }
 
