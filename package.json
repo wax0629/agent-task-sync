@@ -14,7 +14,7 @@
   "scripts": {
     "build": "npm run build --workspace=@agent-task-sync/domain && npm run build --workspace=@agent-task-sync/application && npm run build --workspace=@agent-task-sync/renderer-markdown && npm run build --workspace=@agent-task-sync/store-files && npm run build --workspace=@agent-task-sync/project-registry && npm run build --workspace=@agent-task-sync/sync-git && npm run build --workspace=@agent-task-sync/adapter-contract && npm run build --workspace=@agent-task-sync/cli && npm run build --workspace=@agent-task-sync/adapter-codex && npm run build --workspace=@agent-task-sync/adapter-claude-code && npm run build --workspace=@agent-task-sync/adapter-pi",
     "test": "npm run build && npm run test --workspaces --if-present && npm run test:contract",
-    "test:contract": "tsx --test tests/contract.test.ts",
+    "test:contract": "tsx --test tests/contract.test.ts tests/skill-contract.test.ts",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

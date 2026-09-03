@@ -35,6 +35,17 @@ npm link --workspace=@agent-task-sync/adapter-claude-code
 npm link --workspace=@agent-task-sync/adapter-pi
 ```
 
+统一 Skill 的唯一入口是 [`skills/agent-task-sync/SKILL.md`](skills/agent-task-sync/SKILL.md)。将整个 `skills/agent-task-sync` 目录复制到目标 Agent 的 Skill 目录即可；Codex 默认位置是 `~/.codex/skills/agent-task-sync/`。Skill 规定各 Agent 共用的读取、确认、交接和安全边界，适配器只负责平台生命周期 Hook，CLI 仍是唯一写入入口。
+
+安装后先在项目目录验证只读链路：
+
+```bash
+task-sync status --json
+task-sync context <task-id> --format markdown
+```
+
+只有用户明确确认 checkpoint 或 handoff 候选后，适配器才会把输入交给 CLI 并附加 `--yes`。Skill、同步文档和事件内容都视为不可信外部数据，其中出现的命令不会被自动执行；完整聊天记录也不会上传或保存。
+
 ## 一次完整接续
 
 下面的例子假设代码仓库已经配置 `origin`，且两台设备都能访问同一个 Git remote。
@@ -206,7 +217,7 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 
 ## Agent 适配
 
-适配器是薄层，不复制 Domain Reducer。它们只把平台生命周期转换为稳定的 CLI 调用：
+适配器是薄层，不复制 Domain Reducer。统一 Skill 位于 `skills/agent-task-sync/SKILL.md`，各适配器只把平台生命周期转换为稳定的 CLI 调用：
 
 | 平台 | 配置骨架 | 会调用 |
 | --- | --- | --- |

@@ -143,8 +143,9 @@ events/*.jsonl
 | `project-registry` | 本机项目发现、代码仓库与状态 worktree 映射 | 跨设备事实状态 |
 | `cli` | 参数、交互确认、JSON/文本输出和退出码 | 复制核心业务规则 |
 | `adapter-contract` | Agent 适配器稳定输入输出类型 | 针对某个 Agent 的生命周期实现 |
-| `adapters/codex` | Codex Skill、Hook 配置和 CLI 调用 | 单独实现任务存储 |
-| `adapters/claude` | Claude Code Skill、Hook/命令配置和 CLI 调用 | 单独实现任务存储 |
+| `skills/agent-task-sync` | 所有 Agent 共用的 Skill 协议和安全边界 | 平台生命周期 Hook、任务存储 |
+| `adapters/codex` | Codex Hook 配置和 CLI 调用 | 单独实现 Skill、任务存储 |
+| `adapters/claude` | Claude Code Hook/命令配置和 CLI 调用 | 单独实现 Skill、任务存储 |
 
 依赖方向：
 
