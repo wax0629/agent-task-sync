@@ -1,5 +1,5 @@
 import type { ContinuationContext, ProjectStatus, RebuildResult, SyncResult } from "@agent-task-sync/application";
-import type { TaskState } from "@agent-task-sync/domain";
+import type { ConflictRecord, TaskState } from "@agent-task-sync/domain";
 
 const statusLabels: Record<TaskState["status"], string> = {
   planned: "计划中",
@@ -52,6 +52,32 @@ export function formatTask(task: TaskState): string {
     task.handoff ? `Handoff：${task.handoff.id}` : undefined,
     task.conflicts.length ? `冲突：${task.conflicts.filter((conflict) => !conflict.resolved).length} 个待处理` : undefined
   ].filter(Boolean).join("\n");
+}
+
+export interface ConflictListEntry extends ConflictRecord {
+  taskTitle: string;
+  taskStatus: TaskState["status"];
+}
+
+function conflictValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function formatConflicts(conflicts: readonly ConflictListEntry[]): string {
+  if (conflicts.length === 0) return "没有待处理冲突。";
+  return conflicts.map((conflict) => [
+    `任务：${conflict.taskTitle} (${conflict.taskId}) · 状态：${statusLabels[conflict.taskStatus]}`,
+    `冲突：${conflict.id} · 字段：${conflict.field}`,
+    `父事件：${conflict.parentEventIds.join(", ") || "无"}`,
+    "候选值：",
+    ...conflict.options.map((option) => `- ${option.eventId}: ${conflictValue(option.value)}`),
+    `原因：${conflict.reason}`
+  ].join("\n")).join("\n\n");
 }
 
 export function formatRebuild(result: RebuildResult): string {

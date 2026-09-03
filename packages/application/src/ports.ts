@@ -1,4 +1,5 @@
 import type {
+  ConflictResolvedPayload,
   EventPayload,
   EventWriter,
   TaskEvent,
@@ -182,6 +183,17 @@ export interface VerificationInput {
   confirmed?: boolean;
 }
 
+export interface ResolveConflictInput {
+  taskId: string;
+  conflictId: string;
+  choice: ConflictResolvedPayload["choice"];
+  resolvedEventIds: string[];
+  summary?: string;
+  status?: TaskState["status"];
+  nextAction?: string | null;
+  confirmed?: boolean;
+}
+
 export interface AcceptHandoffInput {
   taskId: string;
   handoffId: string;
@@ -225,6 +237,7 @@ export interface TaskSyncService {
   recordQuestion(input: QuestionInput, actor: Actor): Promise<TaskState>;
   recordError(input: ErrorInput, actor: Actor): Promise<TaskState>;
   recordVerification(input: VerificationInput, actor: Actor): Promise<TaskState>;
+  resolveConflict(input: ResolveConflictInput, actor: Actor): Promise<TaskState>;
   recordCheckpoint(input: CheckpointInput, actor: Actor): Promise<TaskState>;
   createHandoff(input: HandoffInput, actor: Actor): Promise<TaskState>;
   acceptHandoff(input: AcceptHandoffInput, actor: Actor): Promise<TaskState>;

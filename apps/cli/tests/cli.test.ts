@@ -6,6 +6,8 @@ import test from "node:test";
 import { run } from "../src/main.js";
 import { ExitCode } from "../src/exit-codes.js";
 import { createRuntime } from "../src/runtime.js";
+import type { TaskEvent } from "@agent-task-sync/domain";
+import { FileEventStore } from "@agent-task-sync/store-files";
 
 test("init, status, and context expose machine-readable JSON without mixing logs", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-"));
@@ -148,6 +150,53 @@ test("CLI records decision, question, error, and verification context", async ()
     const taskRoot = join(cwd, ".state", "tasks", "task-1");
     assert.match(await readFile(join(taskRoot, "task_plan.md"), "utf8"), /Need product confirmation\?|Sync was rejected|npm test/);
     assert.match(await readFile(join(taskRoot, "progress.md"), "utf8"), /decision_recorded|question_recorded|error_recorded|verification_recorded/);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
+
+test("CLI lists semantic conflicts and resolves them without rewriting competing events", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-conflicts-"));
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Conflicts"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-1", "Conflict task", "--goal", "Review concurrent work", "--yes", "--json"], cwd), ExitCode.ok);
+    const events = new FileEventStore(join(cwd, ".state"));
+    const created = (await events.readTaskEvents("task-1")).find((event) => event.type === "task_created");
+    assert.ok(created);
+    const competing = (eventId: string, nextAction: string, deviceId: string, createdAt: string): TaskEvent => ({
+      eventId,
+      schemaVersion: 1,
+      projectId: "project-1",
+      taskId: "task-1",
+      type: "checkpoint_recorded",
+      payload: { nextAction },
+      parentEventIds: [created.eventId],
+      writer: { agentId: deviceId === "mac" ? "codex" : "claude-code", deviceId, sessionId: `${deviceId}-session` },
+      createdAt
+    });
+    await events.append(competing("conflict-mac", "Mac branch", "mac", "2026-09-03T03:00:00.000Z"));
+    await events.append(competing("conflict-windows", "Windows branch", "windows", "2026-09-03T03:01:00.000Z"));
+
+    assert.equal(await run(["conflicts", "--json"], cwd), ExitCode.conflict);
+    const statusBefore = (await createRuntime(cwd).app.status()).tasks[0];
+    const conflict = statusBefore?.conflicts.find((item) => !item.resolved);
+    assert.ok(conflict);
+    assert.equal(await run(["conflict", "resolve", "task-1", conflict.id, "--choice", "discard", "--resolved-event-id", "conflict-mac", "--resolved-event-id", "conflict-windows", "--yes"], cwd), ExitCode.invalidInput);
+    assert.equal(await run(["conflict", "resolve", "task-1", conflict.id, "--choice", "keep_last", "--resolved-event-id", "conflict-mac", "--yes"], cwd), ExitCode.invalidInput);
+    const unresolved = (await createRuntime(cwd).app.status()).tasks[0];
+    assert.equal(unresolved?.status, "needs_review");
+    assert.equal(unresolved?.conflicts[0]?.resolved, false);
+    assert.equal((await events.readTaskEvents("task-1")).filter((event) => event.type === "conflict_resolved").length, 0);
+
+    assert.equal(await run(["conflict", "resolve", "task-1", conflict.id, "--choice", "keep_last", "--resolved-event-id", "conflict-mac", "--resolved-event-id", "conflict-windows", "--summary", "Keep the latest branch", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal((await events.readTaskEvents("task-1")).filter((event) => event.type === "conflict_resolved").length, 1);
+    assert.equal(await run(["conflicts", "task-1"], cwd), ExitCode.ok);
+    assert.equal(await run(["conflict", "resolve", "task-1", conflict.id, "--choice", "keep_first", "--resolved-event-id", "conflict-mac", "--resolved-event-id", "conflict-windows", "--yes"], cwd), ExitCode.ok);
+    assert.equal((await events.readTaskEvents("task-1")).filter((event) => event.type === "conflict_resolved").length, 1);
+    assert.match(await readFile(join(cwd, ".state", "tasks", "task-1", "progress.md"), "utf8"), /conflict_resolved/);
   } finally {
     if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
