@@ -39,6 +39,7 @@ import type {
   QuestionInput,
   RebuildResult,
   RenderedDocuments,
+  ResolveConflictInput,
   SyncInspection,
   SyncPort,
   SyncResult,
@@ -75,6 +76,20 @@ export class HandoffAlreadyExistsError extends Error {
   constructor(taskId: string, handoffId: string) {
     super(`Handoff ${handoffId} already exists for task ${taskId}.`);
     this.name = "HandoffAlreadyExistsError";
+  }
+}
+
+export class ConflictNotFoundError extends Error {
+  constructor(taskId: string, conflictId: string) {
+    super(`Conflict ${conflictId} does not exist for task ${taskId}.`);
+    this.name = "ConflictNotFoundError";
+  }
+}
+
+export class InvalidConflictResolutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidConflictResolutionError";
   }
 }
 
@@ -225,6 +240,47 @@ export class ApplicationService implements TaskSyncService {
       status: input.status
     };
     await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "verification_recorded", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async resolveConflict(input: ResolveConflictInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const conflict = current.conflicts.find((item) => item.id === input.conflictId);
+    if (!conflict) throw new ConflictNotFoundError(input.taskId, input.conflictId);
+    if (conflict.resolved) return this.rebuildOne(input.taskId);
+
+    if (input.choice !== "keep_first" && input.choice !== "keep_last" && input.choice !== "merge") {
+      throw new InvalidConflictResolutionError("Conflict choice must be keep_first, keep_last, or merge.");
+    }
+    if (!Array.isArray(input.resolvedEventIds) || input.resolvedEventIds.length === 0 || input.resolvedEventIds.some((id) => typeof id !== "string" || !id.trim())) {
+      throw new InvalidConflictResolutionError("Conflict resolution must include every competing event ID.");
+    }
+    const expectedEventIds = [...conflict.eventIds].sort();
+    const resolvedEventIds = [...input.resolvedEventIds].sort();
+    if (new Set(resolvedEventIds).size !== resolvedEventIds.length || expectedEventIds.length !== resolvedEventIds.length || expectedEventIds.some((id, index) => id !== resolvedEventIds[index])) {
+      throw new InvalidConflictResolutionError(`Conflict resolution must reference exactly these event IDs: ${expectedEventIds.join(", ")}.`);
+    }
+    if (input.status !== undefined && !["planned", "in_progress", "blocked", "needs_review", "handoff_ready", "completed", "archived"].includes(input.status)) {
+      throw new InvalidConflictResolutionError(`Invalid task status override: ${String(input.status)}.`);
+    }
+    if (input.nextAction !== undefined && input.nextAction !== null && typeof input.nextAction !== "string") {
+      throw new InvalidConflictResolutionError("Conflict nextAction override must be a string or null.");
+    }
+    if (input.summary !== undefined && typeof input.summary !== "string") {
+      throw new InvalidConflictResolutionError("Conflict resolution summary must be a string.");
+    }
+
+    const payload: ConflictResolvedPayload = {
+      conflictId: conflict.id,
+      choice: input.choice,
+      resolvedEventIds,
+      summary: input.summary,
+      status: input.status,
+      nextAction: input.nextAction
+    };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "conflict_resolved", payload, actor, conflict.eventIds));
     return this.rebuildOne(input.taskId);
   }
 

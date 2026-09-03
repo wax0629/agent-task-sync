@@ -4,9 +4,11 @@ import { basename, join, resolve } from "node:path";
 import {
   ApplicationService,
   ConfirmationRequiredError,
+  ConflictNotFoundError,
   EmptyTaskUpdateError,
   HandoffAlreadyExistsError,
   HandoffNotFoundError,
+  InvalidConflictResolutionError,
   type BlockTaskInput,
   type CheckpointInput,
   type CompleteTaskInput,
@@ -21,7 +23,7 @@ import {
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
 import { ExitCode } from "./exit-codes.js";
-import { formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList } from "./format.js";
+import { formatConflicts, formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry } from "./format.js";
 import { createRuntime } from "./runtime.js";
 
 interface ParsedArgs {
@@ -185,6 +187,11 @@ function optionalBoolean(value: unknown, label: string): boolean | undefined {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new CliInputError(`${label} 必须是布尔值。`);
+}
+
+function conflictChoice(value: string | undefined): "keep_first" | "keep_last" | "merge" {
+  if (value === "keep_first" || value === "keep_last" || value === "merge") return value;
+  throw new CliInputError("冲突选择必须是 keep_first、keep_last 或 merge。");
 }
 
 function inputValue(input: Record<string, unknown>, ...keys: string[]): unknown {
@@ -504,6 +511,57 @@ async function runTaskVerify(parsed: ParsedArgs, runtime: ReturnType<typeof crea
   return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
 }
 
+async function runConflicts(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["task"]);
+  if (parsed.args.length > 1) throw new CliInputError("usage: task-sync conflicts [<task-id>] [--json]");
+  const status = await requireProject(runtime.app);
+  const requestedTaskId = option(parsed.options, "task") ?? parsed.args[0];
+  if (requestedTaskId && !status.tasks.some((task) => task.id === requestedTaskId)) {
+    throw new CliInputError(`任务不存在：${requestedTaskId}`);
+  }
+  const conflicts: ConflictListEntry[] = status.tasks
+    .filter((task) => !requestedTaskId || task.id === requestedTaskId)
+    .flatMap((task) => task.conflicts
+      .filter((conflict) => !conflict.resolved)
+      .map((conflict) => ({ ...conflict, taskTitle: task.title, taskStatus: task.status })));
+  print({ conflicts }, parsed.json, formatConflicts(conflicts));
+  return conflicts.length ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runConflictResolve(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "conflict", "input", "choice", "resolved-event-id", "summary", "status", "next-action", "clear-next-action"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const conflictId = required(option(parsed.options, "conflict") ?? parsed.args[1] ?? inputString(input, "conflictId", "conflict_id"), "冲突 ID");
+  const choice = conflictChoice(option(parsed.options, "choice") ?? inputString(input, "choice"));
+  const resolvedEventIds = mergeList(
+    inputValue(input, "resolvedEventIds", "resolved_event_ids"),
+    optionList(parsed, ["resolved-event-id"]),
+    "resolvedEventIds"
+  );
+  if (!resolvedEventIds?.length) throw new CliInputError("缺少竞争事件 ID，请重复传入 --resolved-event-id 或在 JSON 中提供 resolvedEventIds。");
+  const nextActionInput = inputValue(input, "nextAction", "next_action");
+  const nextAction = hasOption(parsed.options, "clear-next-action")
+    ? null
+    : optionalString(option(parsed.options, "next-action") ?? nextActionInput, "nextAction");
+  const resolution = {
+    taskId,
+    conflictId,
+    choice,
+    resolvedEventIds,
+    summary: option(parsed.options, "summary") ?? inputString(input, "summary"),
+    status: statusValue(option(parsed.options, "status") ?? inputString(input, "status")),
+    nextAction,
+    confirmed: true
+  };
+  const state = await runtime.app.resolveConflict(resolution, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
 async function runCheckpoint(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
   ensureAllowed(parsed, ["yes", "task", "input", "summary", "current-focus", "recent-completed", "next-action", "clear-next-action", "file", "files", "commit", "verification", "uncommitted-change", "uncommitted", "status"]);
   requireYes(parsed);
@@ -643,6 +701,13 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     print({ ok: Boolean(status.project), root: runtime.root }, parsed.json, status.project ? `状态目录正常：${runtime.root}` : "尚未初始化");
     return status.project ? ExitCode.ok : ExitCode.uninitialized;
   }
+  if (parsed.command === "conflicts") return runConflicts(parsed, runtime);
+  if (parsed.command === "conflict") {
+    const subcommand = parsed.args[0];
+    const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
+    if (subcommand === "resolve") return runConflictResolve(nested, runtime);
+    throw new CliInputError("usage: task-sync conflict resolve <task-id> <conflict-id> ...");
+  }
   if (parsed.command === "task") {
     const subcommand = parsed.args[0];
     const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
@@ -694,14 +759,14 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     print(result, parsed.json, formatSync(result));
     return result.inspection.conflict ? ExitCode.conflict : ExitCode.ok;
   }
-  throw new CliInputError("usage: task-sync init|status|task|context|checkpoint|handoff|rebuild|sync|doctor");
+  throw new CliInputError("usage: task-sync init|status|task|conflicts|conflict|context|checkpoint|handoff|rebuild|sync|doctor");
 }
 
 function errorCode(error: unknown): number {
   if (error instanceof UninitializedError) return ExitCode.uninitialized;
   if (error instanceof GitTextConflictError) return ExitCode.conflict;
   if (error instanceof NoRemoteError || error instanceof GitSyncError) return ExitCode.gitFailure;
-  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError || error instanceof EmptyTaskUpdateError || error instanceof HandoffNotFoundError || error instanceof HandoffAlreadyExistsError) return ExitCode.invalidInput;
+  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError || error instanceof EmptyTaskUpdateError || error instanceof HandoffNotFoundError || error instanceof HandoffAlreadyExistsError || error instanceof ConflictNotFoundError || error instanceof InvalidConflictResolutionError) return ExitCode.invalidInput;
   if (error instanceof Error && /unsupported project protocol|protocol version/i.test(error.message)) return ExitCode.incompatible;
   return ExitCode.unexpected;
 }

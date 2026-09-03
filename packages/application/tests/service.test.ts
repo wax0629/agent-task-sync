@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApplicationService, ConfirmationRequiredError } from "../src/index.js";
+import {
+  ApplicationService,
+  ConflictNotFoundError,
+  ConfirmationRequiredError,
+  InvalidConflictResolutionError
+} from "../src/index.js";
 import type {
   EventStore,
   InitProjectInput,
@@ -195,6 +200,65 @@ test("context records append decision, question, error, and verification events"
   assert.equal(state.verification[0]?.status, "passed");
   const documents = projections.documents.get("task-1");
   assert.equal(documents?.taskPlan, "# Context task\n\nNext: none");
+});
+
+test("conflict resolution validates candidates, appends one event, and is idempotent", async () => {
+  const { app, events } = service();
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ taskId: "task-1", projectId: "project-1", title: "Conflict task", goal: "Review competing next actions", confirmed: true }, actor);
+  await app.recordCheckpoint({ taskId: "task-1", nextAction: "Mac branch", confirmed: true }, actor);
+  const created = events.values.find((event) => event.type === "task_created");
+  assert.ok(created);
+  events.values.push({
+    eventId: "event-windows",
+    schemaVersion: 1,
+    projectId: "project-1",
+    taskId: "task-1",
+    type: "checkpoint_recorded",
+    payload: { nextAction: "Windows branch" },
+    parentEventIds: [created.eventId],
+    writer: { agentId: "claude-code", deviceId: "windows", sessionId: "windows-session" },
+    createdAt: "2026-09-03T03:01:00.000Z"
+  });
+
+  const conflict = (await app.status()).tasks[0]?.conflicts[0];
+  assert.ok(conflict);
+  const before = events.values.length;
+  await assert.rejects(
+    app.resolveConflict({ taskId: "task-1", conflictId: conflict.id, choice: "keep_last", resolvedEventIds: conflict.eventIds, confirmed: false }, actor),
+    ConfirmationRequiredError
+  );
+  await assert.rejects(
+    app.resolveConflict({ taskId: "task-1", conflictId: conflict.id, choice: "keep_last", resolvedEventIds: [conflict.eventIds[0] ?? ""], confirmed: true }, actor),
+    InvalidConflictResolutionError
+  );
+  assert.equal(events.values.length, before);
+  await assert.rejects(
+    app.resolveConflict({ taskId: "task-1", conflictId: "missing", choice: "keep_last", resolvedEventIds: conflict.eventIds, confirmed: true }, actor),
+    ConflictNotFoundError
+  );
+
+  const resolved = await app.resolveConflict({
+    taskId: "task-1",
+    conflictId: conflict.id,
+    choice: "keep_last",
+    resolvedEventIds: conflict.eventIds,
+    summary: "Windows branch is the agreed next action",
+    confirmed: true
+  }, actor);
+  assert.equal(resolved.nextAction, "Windows branch");
+  assert.equal(resolved.conflicts[0]?.resolved, true);
+  assert.equal(events.values.filter((event) => event.type === "conflict_resolved").length, 1);
+
+  const repeated = await app.resolveConflict({
+    taskId: "task-1",
+    conflictId: conflict.id,
+    choice: "keep_first",
+    resolvedEventIds: [...conflict.eventIds].reverse(),
+    confirmed: true
+  }, actor);
+  assert.equal(repeated.nextAction, "Windows branch");
+  assert.equal(events.values.filter((event) => event.type === "conflict_resolved").length, 1);
 });
 
 test("sync always goes through SyncPort and rebuilds before push", async () => {

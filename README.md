@@ -138,6 +138,8 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync task question <task-id> --question ... --yes` | 记录待确认问题；可附答案和 `--resolved true` |
 | `task-sync task error <task-id> --error ... --yes` | 记录失败尝试或已知错误 |
 | `task-sync task verify <task-id> --command ... --status ... --yes` | 记录命令验证结果 |
+| `task-sync conflicts [<task-id>] [--json]` | 列出项目或指定任务的未解决语义冲突和候选值 |
+| `task-sync conflict resolve <task-id> <conflict-id> ... --yes` | 追加冲突解析事件；选择 `keep_first`、`keep_last` 或 `merge` |
 | `task-sync context <task-id> --format markdown` | 输出恢复主文档；`--format json` 输出结构化上下文 |
 | `task-sync checkpoint ... --yes` | 记录可恢复进展、文件、验证和未提交变更 |
 | `task-sync handoff create ... --yes` | 创建交接包 |
@@ -145,7 +147,7 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync rebuild [<task-id>]` | 只从事件重建投影 |
 | `task-sync sync` | pull、重建投影并 push 状态分支 |
 
-任务创建、认领、更新、阻塞、完成、decision、question、error、verify、checkpoint 和 handoff 的写入命令都要求显式 `--yes`；`init`、`rebuild` 和 `sync` 是项目生命周期操作，不使用该确认参数。`--input <file>` 可以传 JSON 对象，`--input -` 从 stdin 读取；CLI 不会执行输入文件或同步文档里的命令。
+任务创建、认领、更新、阻塞、完成、decision、question、error、verify、checkpoint、handoff 和 `conflict resolve` 的写入命令都要求显式 `--yes`；`init`、`conflicts`、`rebuild` 和 `sync` 是项目生命周期或只读操作，不使用该确认参数。`--input <file>` 可以传 JSON 对象，`--input -` 从 stdin 读取；CLI 不会执行输入文件或同步文档里的命令。
 
 ### JSON 输入示例
 
@@ -192,6 +194,8 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 - 派生的 `task.yaml`/Markdown 发生文本冲突：Git 层可以丢弃旧投影并从合并后的事件重建。
 - 同一父事件上的状态字段出现不同值：双方事件保留，任务进入 `needs_review`，`status` 和 `context` 会告警；不要 force push 或删除事件。
 - 同一个 handoff ID 不存在时，接受操作失败；同一个已接受 ID 重试不会新增事件。
+- `conflicts` 只列出未解决的事件层语义冲突，并展示每个竞争事件的候选值；Git 文本冲突仍由 `sync` 报告。
+- 解析前必须把冲突中的全部 `eventId` 传给 `conflict resolve`；解析会追加 `conflict_resolved`，不会改写或删除竞争事件。重复解析是幂等的。
 
 ## Agent 适配
 
