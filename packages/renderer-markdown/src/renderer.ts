@@ -1,5 +1,15 @@
-import type { MarkdownRenderer, RenderedDocuments } from "@agent-task-sync/application";
+import type { MarkdownRenderer, ProjectOverview, RenderedDocuments } from "@agent-task-sync/application";
 import type { TaskEvent, TaskState } from "@agent-task-sync/domain";
+
+const statusLabels: Record<TaskState["status"], string> = {
+  planned: "计划中",
+  in_progress: "进行中",
+  blocked: "已阻塞",
+  needs_review: "待审阅",
+  handoff_ready: "待交接",
+  completed: "已完成",
+  archived: "已归档"
+};
 
 function text(value: string | undefined | null, fallback = "未记录"): string {
   const trimmed = value?.trim();
@@ -67,16 +77,7 @@ function eventSummary(event: TaskEvent): string {
 }
 
 function statusLabel(state: TaskState): string {
-  const labels: Record<TaskState["status"], string> = {
-    planned: "计划中",
-    in_progress: "进行中",
-    blocked: "已阻塞",
-    needs_review: "待审阅",
-    handoff_ready: "待交接",
-    completed: "已完成",
-    archived: "已归档"
-  };
-  return labels[state.status];
+  return statusLabels[state.status];
 }
 
 export class MarkdownTaskRenderer implements MarkdownRenderer {
@@ -198,5 +199,64 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
     ].filter((part, index, array) => !(part === "" && array[index - 1] === "")).join("\n") : undefined;
 
     return { taskPlan, progress, handoff };
+  }
+
+  renderProject(overview: ProjectOverview): string {
+    const orderedStatuses: TaskState["status"][] = [
+      "planned",
+      "in_progress",
+      "blocked",
+      "needs_review",
+      "handoff_ready",
+      "completed",
+      "archived"
+    ];
+    const syncLabel = overview.sync.conflict
+      ? "存在冲突"
+      : overview.sync.remoteAhead
+        ? "远程领先"
+        : overview.sync.localAhead
+          ? "本地领先"
+          : "已同步";
+    const taskLines = overview.tasks.length
+      ? overview.tasks.map((task) => [
+        `- [${statusLabels[task.status]}] ${line(task.title)} (${task.id})`,
+        task.currentFocus ? `  - 当前关注：${line(task.currentFocus)}` : undefined,
+        task.nextAction ? `  - 下一步：${line(task.nextAction)}` : undefined,
+        task.pendingHandoff ? "  - 待处理：handoff" : undefined,
+        task.unresolvedConflictCount ? `  - 待审阅冲突：${task.unresolvedConflictCount} 个` : undefined
+      ].filter((value): value is string => Boolean(value)).join("\n")).join("\n")
+      : "- 暂无任务";
+    const activityLines = overview.recentActivity.length
+      ? overview.recentActivity.map((activity) => `- ${activity.createdAt} · ${line(activity.taskTitle)} (${activity.taskId}) · ${line(activity.summary)} · ${line(activity.agentId)}/${line(activity.deviceId)}`).join("\n")
+      : "- 暂无活动";
+    return [
+      `# 项目进度：${line(overview.projectName)}`,
+      "",
+      `> 项目 ID：${line(overview.projectId)}`,
+      `> 最近活动：${overview.lastActivityAt ?? "未记录"}`,
+      "",
+      "## 状态概览",
+      "",
+      `- 任务总数：${overview.taskCount}`,
+      ...orderedStatuses.map((status) => `- ${statusLabels[status]}：${overview.statusCounts[status]}`),
+      `- 待处理 handoff：${overview.pendingHandoffCount}`,
+      `- 未解决冲突：${overview.unresolvedConflictCount}`,
+      `- 同步状态：${syncLabel}`,
+      `- 本地未同步事件：${overview.sync.localEventCount}`,
+      "",
+      "## 任务概览",
+      "",
+      taskLines,
+      "",
+      "## 最近活动",
+      "",
+      activityLines,
+      "",
+      "## 说明",
+      "",
+      "本文档由 `.task-sync` 事件重建生成，不是事实来源。请通过 task-sync CLI 记录修改。",
+      ""
+    ].join("\n");
   }
 }

@@ -59,10 +59,13 @@ test("projection files are stable and validate task state", async () => {
   const store = new FileProjectionStore(root);
   await store.writeTaskState(makeState());
   await store.writeMarkdown("task-1", { taskPlan: "# Demo\r\n", progress: "# Log\r\n" });
+  await store.writeProjectMarkdown("# Project\r\n");
   const first = await readFile(join(root, "tasks", "task-1", "task_plan.md"), "utf8");
+  const project = await readFile(join(root, "progress.md"), "utf8");
   await store.writeMarkdown("task-1", { taskPlan: "# Demo\n", progress: "# Log\n" });
   const second = await readFile(join(root, "tasks", "task-1", "task_plan.md"), "utf8");
   assert.equal(first, "# Demo\n");
+  assert.equal(project, "# Project\n");
   assert.equal(second, first);
   assert.equal((await store.readTaskState("task-1"))?.title, "Demo");
 });

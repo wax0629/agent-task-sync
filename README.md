@@ -1,6 +1,6 @@
 # Agent Task Sync
 
-轻量的多 Agent、多设备任务接续工具。它以 JSONL 事件作为事实来源，用 `task.yaml`、`task_plan.md`、`progress.md` 和 `handoff.md` 生成可读、可重建的任务上下文，并通过 Git 状态分支在设备之间同步。
+轻量的多 Agent、多设备任务接续工具。它以 JSONL 事件作为事实来源，用项目级/任务级 `progress.md`、`task.yaml`、`task_plan.md` 和 `handoff.md` 生成可读、可重建的任务上下文，并通过 Git 状态分支在设备之间同步。
 
 当前版本是 CLI + 文件协议 + 薄适配器。它不会读取或保存完整聊天记录，也不会修改用户正在开发的代码分支。
 
@@ -99,6 +99,7 @@ task-sync sync
 .task-sync/
 ├── project.yaml
 ├── current-task
+├── progress.md
 └── tasks/<task-id>/
     ├── events/<device>/<agent>/<session>.jsonl
     ├── task.yaml
@@ -108,10 +109,11 @@ task-sync sync
 ```
 
 - `events/**/*.jsonl`：追加式事件，是唯一事实来源；每个事件包含 ID、父事件、写入者和时间。
+- `progress.md`：项目级概览，按状态统计任务、列出待处理 handoff/冲突和最近活动；可由事件重建。
 - `task.yaml`：机器读取的当前聚合状态，可由事件重建。
 - `task_plan.md`：新 Agent 恢复任务所需的目标、当前工作、决策、问题、文件和验证。
-- `progress.md`：按时间生成的工作日志，保留 checkpoint、handoff 创建和接受的历史摘要。
-- `handoff.md`：当前有效交接包；历史仍在事件和 `progress.md` 中。
+- `tasks/<task-id>/progress.md`：按时间生成的任务工作日志，保留 checkpoint、handoff 创建和接受的历史摘要。
+- `handoff.md`：当前有效交接包；历史仍在事件和任务级 `progress.md` 中。
 
 Git 仓库默认使用独立状态 worktree：
 
@@ -126,7 +128,7 @@ Git 仓库默认使用独立状态 worktree：
 | 命令 | 作用 |
 | --- | --- |
 | `task-sync init [project-id] [project-name]` | 注册项目并初始化状态 worktree |
-| `task-sync status [--json]` | 查看项目、任务和 Git 同步状态 |
+| `task-sync status [--json]` | 查看项目概览、任务和 Git 同步状态 |
 | `task-sync doctor` | 检查状态目录是否已初始化 |
 | `task-sync task create ... --yes` | 创建任务事件 |
 | `task-sync task list [--json]` | 列出当前项目任务 |
@@ -196,6 +198,7 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 - 同一个 handoff ID 不存在时，接受操作失败；同一个已接受 ID 重试不会新增事件。
 - `conflicts` 只列出未解决的事件层语义冲突，并展示每个竞争事件的候选值；Git 文本冲突仍由 `sync` 报告。
 - 解析前必须把冲突中的全部 `eventId` 传给 `conflict resolve`；解析会追加 `conflict_resolved`，不会改写或删除竞争事件。重复解析是幂等的。
+- 项目级 `progress.md` 与任务级投影一样只由事件重建；`rebuild` 或 `sync` 会原子恢复它，删除后不会影响事件事实。
 
 ## Agent 适配
 

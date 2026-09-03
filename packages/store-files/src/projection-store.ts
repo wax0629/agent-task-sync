@@ -4,7 +4,7 @@ import { parse, stringify } from "yaml";
 import type { ProjectionStore, RenderedDocuments } from "@agent-task-sync/application";
 import { assertValidTaskState, type TaskState } from "@agent-task-sync/domain";
 import { writeFileAtomically } from "./atomic.js";
-import { taskDirectory } from "./paths.js";
+import { projectProgressPath, taskDirectory } from "./paths.js";
 
 export class FileProjectionStore implements ProjectionStore {
   constructor(public readonly rootDir: string) {}
@@ -19,6 +19,10 @@ export class FileProjectionStore implements ProjectionStore {
     await writeFileAtomically(join(directory, "task_plan.md"), ensureLf(documents.taskPlan));
     await writeFileAtomically(join(directory, "progress.md"), ensureLf(documents.progress));
     if (documents.handoff !== undefined) await writeFileAtomically(join(directory, "handoff.md"), ensureLf(documents.handoff));
+  }
+
+  async writeProjectMarkdown(markdown: string): Promise<void> {
+    await writeFileAtomically(projectProgressPath(this.rootDir), ensureLf(markdown));
   }
 
   async readTaskState(taskId: string): Promise<TaskState | undefined> {

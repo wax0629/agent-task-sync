@@ -19,6 +19,41 @@ export interface ProjectInfo {
   defaultBranch?: string;
 }
 
+export interface ProjectActivity {
+  eventId: string;
+  taskId: string;
+  taskTitle: string;
+  type: TaskEvent["type"];
+  createdAt: string;
+  agentId: string;
+  deviceId: string;
+  summary: string;
+}
+
+export interface ProjectTaskSummary {
+  id: string;
+  title: string;
+  status: TaskState["status"];
+  currentFocus?: string;
+  nextAction?: string;
+  updatedAt: string;
+  pendingHandoff: boolean;
+  unresolvedConflictCount: number;
+}
+
+export interface ProjectOverview {
+  projectId: string;
+  projectName: string;
+  taskCount: number;
+  statusCounts: Record<TaskState["status"], number>;
+  pendingHandoffCount: number;
+  unresolvedConflictCount: number;
+  lastActivityAt?: string;
+  recentActivity: ProjectActivity[];
+  tasks: ProjectTaskSummary[];
+  sync: SyncInspection;
+}
+
 export interface InitProjectInput {
   projectId: string;
   name: string;
@@ -47,10 +82,12 @@ export interface RenderedDocuments {
 export interface ProjectionStore {
   writeTaskState(state: TaskState): Promise<void>;
   writeMarkdown(taskId: string, documents: RenderedDocuments): Promise<void>;
+  writeProjectMarkdown(markdown: string): Promise<void>;
 }
 
 export interface MarkdownRenderer {
   render(state: TaskState, events: readonly TaskEvent[]): RenderedDocuments;
+  renderProject(overview: ProjectOverview): string;
 }
 
 export interface SyncInspection {
@@ -216,6 +253,7 @@ export interface ProjectStatus {
   project?: ProjectInfo;
   tasks: TaskState[];
   sync: SyncInspection;
+  overview?: ProjectOverview;
 }
 
 export interface SyncResult {
