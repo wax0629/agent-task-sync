@@ -4,11 +4,15 @@ import { basename, join, resolve } from "node:path";
 import {
   ApplicationService,
   ConfirmationRequiredError,
+  EmptyTaskUpdateError,
   HandoffAlreadyExistsError,
   HandoffNotFoundError,
+  type BlockTaskInput,
   type CheckpointInput,
+  type CompleteTaskInput,
   type HandoffInput,
-  type ProjectStatus
+  type ProjectStatus,
+  type UpdateTaskInput
 } from "@agent-task-sync/application";
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
@@ -164,6 +168,13 @@ function inputString(input: Record<string, unknown>, ...keys: string[]): string 
   return undefined;
 }
 
+function optionalString(value: unknown, label: string): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") throw new CliInputError(`${label} 必须是字符串或 null。`);
+  return value;
+}
+
 function inputValue(input: Record<string, unknown>, ...keys: string[]): unknown {
   return keys.map((key) => input[key]).find((value) => value !== undefined);
 }
@@ -301,6 +312,104 @@ async function runTaskUse(parsed: ParsedArgs, runtime: ReturnType<typeof createR
   }, { ...runtime.actor(), confirmed: true });
   await saveCurrentTask(runtime.root, taskId);
   print(state, parsed.json, `已选择任务：${state.title}`);
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskUpdate(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, [
+    "yes",
+    "task",
+    "input",
+    "title",
+    "goal",
+    "background",
+    "clear-background",
+    "status",
+    "current-focus",
+    "clear-current-focus",
+    "recent-completed",
+    "next-action",
+    "clear-next-action",
+    "acceptance",
+    "phases",
+    "current-phase",
+    "clear-current-phase"
+  ]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const update: UpdateTaskInput = { taskId, confirmed: true };
+  const title = option(parsed.options, "title") ?? inputString(input, "title");
+  const goal = option(parsed.options, "goal") ?? inputString(input, "goal");
+  const background = hasOption(parsed.options, "clear-background")
+    ? null
+    : optionalString(option(parsed.options, "background") ?? inputValue(input, "background"), "background");
+  const currentFocus = hasOption(parsed.options, "clear-current-focus")
+    ? null
+    : optionalString(option(parsed.options, "current-focus") ?? inputValue(input, "currentFocus", "current_focus"), "currentFocus");
+  const nextAction = hasOption(parsed.options, "clear-next-action")
+    ? null
+    : optionalString(option(parsed.options, "next-action") ?? inputValue(input, "nextAction", "next_action"), "nextAction");
+  const currentPhaseId = hasOption(parsed.options, "clear-current-phase")
+    ? null
+    : optionalString(option(parsed.options, "current-phase") ?? inputValue(input, "currentPhaseId", "current_phase_id"), "currentPhaseId");
+  const acceptanceValue = optionList(parsed, ["acceptance"]);
+  const acceptanceCriteria = acceptanceValue
+    ? normalizeCriteria(acceptanceValue)
+    : normalizeInputCriteria(inputValue(input, "acceptanceCriteria", "acceptance_criteria"));
+  const phases = option(parsed.options, "phases")
+    ? normalizePhases(parseJsonValue(required(option(parsed.options, "phases"), "phases"), "phases"))
+    : normalizePhases(inputValue(input, "phases"));
+  const recentCompleted = mergeList(inputValue(input, "recentCompleted", "recent_completed"), optionList(parsed, ["recent-completed"]), "recentCompleted");
+  if (title !== undefined) update.title = required(title, "任务标题");
+  if (goal !== undefined) update.goal = required(goal, "任务目标");
+  if (background !== undefined) update.background = background;
+  if (currentFocus !== undefined) update.currentFocus = currentFocus;
+  if (nextAction !== undefined) update.nextAction = nextAction;
+  if (currentPhaseId !== undefined) update.currentPhaseId = currentPhaseId;
+  if (acceptanceCriteria !== undefined) update.acceptanceCriteria = acceptanceCriteria;
+  if (phases !== undefined) update.phases = phases;
+  if (recentCompleted !== undefined) update.recentCompleted = recentCompleted;
+  const status = statusValue(option(parsed.options, "status") ?? inputString(input, "status"));
+  if (status !== undefined) update.status = status;
+  const state = await runtime.app.updateTask(update, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskBlock(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "reason"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const block: BlockTaskInput = {
+    taskId,
+    reason: option(parsed.options, "reason") ?? inputString(input, "reason"),
+    confirmed: true
+  };
+  const state = await runtime.app.blockTask(block, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskComplete(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "summary"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const complete: CompleteTaskInput = {
+    taskId,
+    summary: option(parsed.options, "summary") ?? inputString(input, "summary"),
+    confirmed: true
+  };
+  const state = await runtime.app.completeTask(complete, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
   return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
 }
 
@@ -454,7 +563,10 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
       return status.tasks.some((task) => task.conflicts.some((conflict) => !conflict.resolved)) ? ExitCode.conflict : ExitCode.ok;
     }
     if (subcommand === "use") return runTaskUse(nested, runtime);
-    throw new CliInputError("usage: task-sync task create|list|use");
+    if (subcommand === "update") return runTaskUpdate(nested, runtime);
+    if (subcommand === "block") return runTaskBlock(nested, runtime);
+    if (subcommand === "complete") return runTaskComplete(nested, runtime);
+    throw new CliInputError("usage: task-sync task create|list|use|update|block|complete");
   }
   if (parsed.command === "context") {
     ensureAllowed(parsed, ["task"]);
@@ -494,7 +606,7 @@ function errorCode(error: unknown): number {
   if (error instanceof UninitializedError) return ExitCode.uninitialized;
   if (error instanceof GitTextConflictError) return ExitCode.conflict;
   if (error instanceof NoRemoteError || error instanceof GitSyncError) return ExitCode.gitFailure;
-  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError || error instanceof HandoffNotFoundError || error instanceof HandoffAlreadyExistsError) return ExitCode.invalidInput;
+  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError || error instanceof EmptyTaskUpdateError || error instanceof HandoffNotFoundError || error instanceof HandoffAlreadyExistsError) return ExitCode.invalidInput;
   if (error instanceof Error && /unsupported project protocol|protocol version/i.test(error.message)) return ExitCode.incompatible;
   return ExitCode.unexpected;
 }
