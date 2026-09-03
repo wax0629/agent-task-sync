@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-task-sync.dev/schema/task-state.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "projectId", "title", "goal", "acceptanceCriteria", "status", "recentCompleted", "decisions", "openQuestions", "knownErrors", "references", "verification", "sync", "conflicts", "revision", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "projectId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "background": { "type": "string" },
+    "acceptanceCriteria": { "type": "array", "items": { "type": "object" } },
+    "status": { "type": "string", "enum": ["planned", "in_progress", "blocked", "needs_review", "handoff_ready", "completed", "archived"] },
+    "currentFocus": { "type": "string" },
+    "recentCompleted": { "type": "array", "items": { "type": "string" } },
+    "nextAction": { "type": "string" },
+    "phases": { "type": "array", "items": { "type": "object" } },
+    "currentPhaseId": { "type": "string" },
+    "decisions": { "type": "array", "items": { "type": "object" } },
+    "openQuestions": { "type": "array", "items": { "type": "object" } },
+    "knownErrors": { "type": "array", "items": { "type": "object" } },
+    "references": { "type": "array", "items": { "type": "object" } },
+    "verification": { "type": "array", "items": { "type": "object" } },
+    "ownership": { "type": "object" },
+    "sync": { "type": "object" },
+    "handoff": { "type": "object" },
+    "conflicts": { "type": "array", "items": { "type": "object" } },
+    "revision": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}
