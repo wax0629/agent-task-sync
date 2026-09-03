@@ -325,7 +325,9 @@ function applyEvent(state: TaskState, event: TaskEvent): void {
         state.handoff.acceptedAt = event.createdAt;
         state.handoff.acceptedBy = ownershipFromEvent(event, event.writer);
         state.status = "in_progress";
-        state.ownership = state.handoff.acceptedBy;
+        // Keep the two projections value-equivalent without sharing an object
+        // reference that can be emitted as an unsupported YAML alias.
+        state.ownership = { ...state.handoff.acceptedBy };
       }
       break;
     }
