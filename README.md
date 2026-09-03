@@ -131,7 +131,7 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync status [--json]` | 查看项目概览、任务和 Git 同步状态 |
 | `task-sync doctor` | 检查状态目录是否已初始化 |
 | `task-sync task create ... --yes` | 创建任务事件 |
-| `task-sync task list [--json]` | 列出当前项目任务 |
+| `task-sync task list [--status <status>] [--attention <kind>] [--json]` | 列出当前项目任务，可按状态或待处理事项筛选 |
 | `task-sync task use <task-id> --yes` | 记录当前任务认领和本地指针 |
 | `task-sync task update <task-id> ... --yes` | 更新任务元数据、状态、当前工作或下一步 |
 | `task-sync task block <task-id> [--reason ...] --yes` | 记录阻塞原因并将任务置为阻塞 |
@@ -150,6 +150,8 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync sync` | pull、重建投影并 push 状态分支 |
 
 任务创建、认领、更新、阻塞、完成、decision、question、error、verify、checkpoint、handoff 和 `conflict resolve` 的写入命令都要求显式 `--yes`；`init`、`conflicts`、`rebuild` 和 `sync` 是项目生命周期或只读操作，不使用该确认参数。`--input <file>` 可以传 JSON 对象，`--input -` 从 stdin 读取；CLI 不会执行输入文件或同步文档里的命令。
+
+`task list` 默认返回全部任务；`--status` 支持 `planned`、`in_progress`、`blocked`、`needs_review`、`handoff_ready`、`completed` 和 `archived`，`--attention` 支持 `active`、`handoff`、`blocked`、`conflict` 和 `unsynced`。同时指定两个筛选条件时取交集；筛选是只读的，不会改变任务或事件。
 
 ### JSON 输入示例
 
