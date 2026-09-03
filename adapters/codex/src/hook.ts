@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createCodexAdapter } from "./index.js";
 import { runHook } from "@agent-task-sync/adapter-contract";
 

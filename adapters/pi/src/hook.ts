@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createPiAdapter } from "./index.js";
 import { runHook } from "@agent-task-sync/adapter-contract";
 

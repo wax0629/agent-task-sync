@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ApplicationService,
   ConfirmationRequiredError,
@@ -802,6 +804,17 @@ export async function run(argv: readonly string[], cwd = process.cwd()): Promise
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+function isMainModule(): boolean {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entrypoint) === realpathSync(modulePath);
+  } catch {
+    return resolve(entrypoint) === resolve(modulePath);
+  }
+}
+
+if (isMainModule()) {
   run(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }

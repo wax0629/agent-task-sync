@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, symlink } from "node:fs/promises";
 import test from "node:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,15 +18,16 @@ const hookEntrypoints = [
   ["pi", join(root, "adapters", "pi", "dist", "hook.js")]
 ] as const;
 
-function runHook(entrypoint: string, hook: string, input: string, cwd: string): Promise<HookProcessResult> {
+function runProcess(
+  args: string[],
+  input: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv = { ...process.env, PATH: join(tmpdir(), "agent-task-sync-no-cli") }
+): Promise<HookProcessResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entrypoint, hook], {
-      cwd: root,
-      env: {
-        ...process.env,
-        // Keep the process test independent from a globally linked task-sync.
-        PATH: join(tmpdir(), "agent-task-sync-no-cli")
-      },
+    const child = spawn(process.execPath, args, {
+      cwd,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     });
@@ -40,6 +41,10 @@ function runHook(entrypoint: string, hook: string, input: string, cwd: string): 
     child.once("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
     child.stdin.end(input);
   });
+}
+
+function runHook(entrypoint: string, hook: string, input: string, cwd: string): Promise<HookProcessResult> {
+  return runProcess([entrypoint, hook], input, root);
 }
 
 async function parseResult(entrypoint: string, hook: string, input: string, cwd: string): Promise<Record<string, unknown>> {
@@ -57,6 +62,7 @@ test("compiled Codex, Claude Code, and Pi hooks keep every dispatch non-blocking
   const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-hook-process-"));
 
   for (const [adapter, entrypoint] of hookEntrypoints) {
+    assert.match(await readFile(entrypoint, "utf8"), /^#!\/usr\/bin\/env node\n/, `${adapter} hook must be executable as a bin`);
     const sessionStart = await parseResult(entrypoint, "session_start", JSON.stringify({ cwd }), cwd);
     assert.equal(sessionStart.hook, "session_start", `${adapter} session_start dispatch`);
     assert.match(String(sessionStart.warning), /task-sync|not found|ENOENT/i);
@@ -101,4 +107,16 @@ test("compiled Codex, Claude Code, and Pi hooks keep every dispatch non-blocking
     assert.equal(unknown.hook, "unknown");
     assert.equal((unknown.invocations as unknown[]).length, 0);
   }
+});
+
+test("CLI starts when invoked through an npm-style symlink", { skip: process.platform === "win32" }, async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-link-"));
+  const linkedCli = join(cwd, "task-sync");
+  await symlink(join(root, "apps", "cli", "dist", "main.js"), linkedCli);
+  const result = await runProcess([linkedCli, "doctor", "--json"], "", cwd, process.env);
+  assert.equal(result.exitCode, 3, `linked CLI stderr: ${result.stderr}`);
+  assert.equal(result.stderr, "");
+  const report = JSON.parse(result.stdout) as Record<string, unknown>;
+  assert.equal(report.ok, false);
+  assert.equal(report.initialized, false);
 });
