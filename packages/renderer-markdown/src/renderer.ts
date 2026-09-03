@@ -14,6 +14,58 @@ function bullets(values: readonly string[], fallback = "- 未记录"): string {
   return values.length ? values.map((value) => `- ${line(value)}`).join("\n") : fallback;
 }
 
+function eventSummary(event: TaskEvent): string {
+  const payload = event.payload as {
+    summary?: string;
+    command?: string;
+    result?: string;
+    reason?: string;
+    currentFocus?: string;
+    nextAction?: string | null;
+    filesChanged?: string[];
+    commit?: string;
+    uncommittedChanges?: string[];
+    verification?: Array<{ command: string; status: string }>;
+    handoffId?: string;
+    completedWork?: string[];
+    incompleteWork?: string[];
+    nextStep?: string | null;
+    relevantFiles?: string[];
+    testSummary?: string;
+    targetAgent?: string;
+  };
+  if (event.type === "checkpoint_recorded") {
+    return [
+      payload.summary,
+      payload.currentFocus ? `当前关注：${payload.currentFocus}` : undefined,
+      payload.nextAction ? `下一步：${payload.nextAction}` : undefined,
+      payload.filesChanged?.length ? `文件：${payload.filesChanged.join(", ")}` : undefined,
+      payload.commit ? `commit：${payload.commit}` : undefined,
+      payload.uncommittedChanges?.length ? `未提交：${payload.uncommittedChanges.join(", ")}` : undefined,
+      payload.verification?.length ? `验证：${payload.verification.map((item) => `${item.command}（${item.status}）`).join(", ")}` : undefined
+    ].filter((value): value is string => Boolean(value)).map(line).join("；") || "记录 checkpoint";
+  }
+  if (event.type === "handoff_created") {
+    const id = payload.handoffId ?? `handoff-${event.eventId}`;
+    return [
+      `创建交接 ${id}`,
+      payload.targetAgent ? `目标 Agent：${payload.targetAgent}` : undefined,
+      payload.completedWork?.length ? `已完成：${payload.completedWork.join(", ")}` : undefined,
+      payload.incompleteWork?.length ? `未完成：${payload.incompleteWork.join(", ")}` : undefined,
+      payload.nextStep ? `下一步：${payload.nextStep}` : undefined,
+      payload.relevantFiles?.length ? `文件：${payload.relevantFiles.join(", ")}` : undefined,
+      payload.testSummary ? `测试：${payload.testSummary}` : undefined
+    ].filter((value): value is string => Boolean(value)).map(line).join("；");
+  }
+  if (event.type === "handoff_accepted") {
+    return `接受交接 ${payload.handoffId ?? "未命名交接"}`;
+  }
+  return payload.summary
+    ?? (payload.command ? `${payload.command}：${payload.result ?? ""}` : undefined)
+    ?? (payload.reason ? payload.reason : undefined)
+    ?? (payload.currentFocus ? `当前关注：${payload.currentFocus}` : event.type);
+}
+
 function statusLabel(state: TaskState): string {
   const labels: Record<TaskState["status"], string> = {
     planned: "计划中",
@@ -54,6 +106,25 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
       "",
       `下一步：${text(state.nextAction, "未指定")}`,
       ...(state.phases?.length ? ["", "阶段：", ...state.phases.sort((a, b) => a.order - b.order).map((item) => `- ${item.status === "completed" ? "[x]" : "[ ]"} ${line(item.title)}（${item.status}）`)] : []),
+      ...(state.handoff ? [
+        "",
+        "## 当前交接",
+        "",
+        `交接 ID：${line(state.handoff.id)}`,
+        `创建时间：${state.handoff.createdAt}`,
+        state.handoff.acceptedAt ? `接受时间：${state.handoff.acceptedAt}` : "接受状态：待接受",
+        state.handoff.acceptedBy ? `接受者：${line(state.handoff.acceptedBy.agentId)} / ${line(state.handoff.acceptedBy.deviceId)}` : "",
+        state.handoff.targetAgent ? `目标 Agent：${line(state.handoff.targetAgent)}` : "",
+        "",
+        "已完成：",
+        bullets(state.handoff.completedWork),
+        "",
+        "未完成：",
+        bullets(state.handoff.incompleteWork),
+        "",
+        `交接下一步：${text(state.handoff.nextStep, "未指定")}`,
+        state.handoff.testSummary ? `测试摘要：${line(state.handoff.testSummary)}` : ""
+      ] : []),
       "",
       "## 关键决策",
       "",
@@ -67,11 +138,13 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
       "## 文件与验证",
       "",
       state.references.length ? state.references.map((reference) => `- ${reference.path ? `文件：${line(reference.path)}` : "记录"}${reference.commit ? ` · commit：${line(reference.commit)}` : ""}${reference.note ? ` · ${line(reference.note)}` : ""}`).join("\n") : "- 未记录文件变化",
+      ...(state.uncommittedChanges !== undefined ? ["", "未提交变更：", bullets(state.uncommittedChanges, "- 无")] : []),
       state.verification.length ? state.verification.map((result) => `- [${result.status}] \`${line(result.command)}\`：${line(result.result)}`).join("\n") : "- 未记录验证结果",
       "",
       "## 同步与责任",
       "",
       state.ownership ? `当前责任：${line(state.ownership.agentId)} / ${line(state.ownership.deviceId)}${state.ownership.sessionId ? ` / ${line(state.ownership.sessionId)}` : ""}` : "当前未认领",
+      `同步状态：${state.sync.conflict ? "存在冲突" : state.sync.remoteAhead ? "远程领先" : state.sync.localAhead ? "本地领先" : "已同步"}`,
       `本地未同步事件：${state.sync.unsyncedEventCount}`,
       state.conflicts.length ? `冲突：${state.conflicts.filter((conflict) => !conflict.resolved).length} 个待处理` : "冲突：无",
       "",
@@ -86,9 +159,7 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
       "# 工作日志",
       "",
       ...[...events].sort((left, right) => `${left.createdAt}:${left.eventId}`.localeCompare(`${right.createdAt}:${right.eventId}`)).map((event) => {
-        const payload = event.payload as { summary?: string; command?: string; result?: string };
-        const summary = payload.summary ?? (payload.command ? `${payload.command}：${payload.result ?? ""}` : event.type);
-        return `- ${event.createdAt} · ${line(event.writer.agentId)}/${line(event.writer.deviceId)} · ${event.type} · ${line(summary)}`;
+        return `- ${event.createdAt} · ${line(event.writer.agentId)}/${line(event.writer.deviceId)} · ${event.type} · ${line(eventSummary(event))}`;
       }),
       ""
     ].join("\n");
@@ -96,7 +167,10 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
     const handoff = state.handoff ? [
       `# Handoff：${line(state.title)}`,
       "",
+      `交接 ID：${line(state.handoff.id)}`,
       `创建时间：${state.handoff.createdAt}`,
+      state.handoff.acceptedAt ? `接受时间：${state.handoff.acceptedAt}` : "接受状态：待接受",
+      state.handoff.acceptedBy ? `接受者：${line(state.handoff.acceptedBy.agentId)} / ${line(state.handoff.acceptedBy.deviceId)}` : "",
       state.handoff.targetAgent ? `目标 Agent：${line(state.handoff.targetAgent)}` : "",
       "",
       "## 已完成",
