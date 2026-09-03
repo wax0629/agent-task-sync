@@ -134,6 +134,10 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync task update <task-id> ... --yes` | 更新任务元数据、状态、当前工作或下一步 |
 | `task-sync task block <task-id> [--reason ...] --yes` | 记录阻塞原因并将任务置为阻塞 |
 | `task-sync task complete <task-id> [--summary ...] --yes` | 记录完成摘要并将任务置为已完成 |
+| `task-sync task decision <task-id> --decision ... --yes` | 记录关键决策及原因 |
+| `task-sync task question <task-id> --question ... --yes` | 记录待确认问题；可附答案和 `--resolved true` |
+| `task-sync task error <task-id> --error ... --yes` | 记录失败尝试或已知错误 |
+| `task-sync task verify <task-id> --command ... --status ... --yes` | 记录命令验证结果 |
 | `task-sync context <task-id> --format markdown` | 输出恢复主文档；`--format json` 输出结构化上下文 |
 | `task-sync checkpoint ... --yes` | 记录可恢复进展、文件、验证和未提交变更 |
 | `task-sync handoff create ... --yes` | 创建交接包 |
@@ -141,7 +145,7 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync rebuild [<task-id>]` | 只从事件重建投影 |
 | `task-sync sync` | pull、重建投影并 push 状态分支 |
 
-任务创建、认领、更新、阻塞、完成、checkpoint 和 handoff 的写入命令都要求显式 `--yes`；`init`、`rebuild` 和 `sync` 是项目生命周期操作，不使用该确认参数。`--input <file>` 可以传 JSON 对象，`--input -` 从 stdin 读取；CLI 不会执行输入文件或同步文档里的命令。
+任务创建、认领、更新、阻塞、完成、decision、question、error、verify、checkpoint 和 handoff 的写入命令都要求显式 `--yes`；`init`、`rebuild` 和 `sync` 是项目生命周期操作，不使用该确认参数。`--input <file>` 可以传 JSON 对象，`--input -` 从 stdin 读取；CLI 不会执行输入文件或同步文档里的命令。
 
 ### JSON 输入示例
 

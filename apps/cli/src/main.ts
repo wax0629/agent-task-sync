@@ -10,9 +10,13 @@ import {
   type BlockTaskInput,
   type CheckpointInput,
   type CompleteTaskInput,
+  type DecisionInput,
+  type ErrorInput,
   type HandoffInput,
   type ProjectStatus,
-  type UpdateTaskInput
+  type QuestionInput,
+  type UpdateTaskInput,
+  type VerificationInput
 } from "@agent-task-sync/application";
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
@@ -173,6 +177,14 @@ function optionalString(value: unknown, label: string): string | null | undefine
   if (value === null) return null;
   if (typeof value !== "string") throw new CliInputError(`${label} 必须是字符串或 null。`);
   return value;
+}
+
+function optionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new CliInputError(`${label} 必须是布尔值。`);
 }
 
 function inputValue(input: Record<string, unknown>, ...keys: string[]): unknown {
@@ -413,6 +425,85 @@ async function runTaskComplete(parsed: ParsedArgs, runtime: ReturnType<typeof cr
   return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
 }
 
+async function runTaskDecision(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "decision", "reason"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const decision: DecisionInput = {
+    taskId,
+    decision: required(option(parsed.options, "decision") ?? inputString(input, "decision"), "决策内容"),
+    reason: option(parsed.options, "reason") ?? inputString(input, "reason"),
+    confirmed: true
+  };
+  const state = await runtime.app.recordDecision(decision, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskQuestion(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "question", "answer", "resolved"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const resolved = optionalBoolean(option(parsed.options, "resolved") ?? inputValue(input, "resolved"), "resolved");
+  const question: QuestionInput = {
+    taskId,
+    question: required(option(parsed.options, "question") ?? inputString(input, "question"), "问题内容"),
+    answer: option(parsed.options, "answer") ?? inputString(input, "answer"),
+    resolved,
+    confirmed: true
+  };
+  const state = await runtime.app.recordQuestion(question, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskError(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "error", "attempts", "resolved"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const resolved = optionalBoolean(option(parsed.options, "resolved") ?? inputValue(input, "resolved"), "resolved");
+  const error: ErrorInput = {
+    taskId,
+    error: required(option(parsed.options, "error") ?? inputString(input, "error"), "错误内容"),
+    attempts: option(parsed.options, "attempts") ?? inputString(input, "attempts"),
+    resolved,
+    confirmed: true
+  };
+  const state = await runtime.app.recordError(error, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
+async function runTaskVerify(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["yes", "task", "input", "command", "result", "status"]);
+  requireYes(parsed);
+  const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed, input);
+  const status = option(parsed.options, "status") ?? inputString(input, "status");
+  if (status !== "passed" && status !== "failed" && status !== "skipped") throw new CliInputError("验证状态必须是 passed、failed 或 skipped。");
+  const verification: VerificationInput = {
+    taskId,
+    command: required(option(parsed.options, "command") ?? inputString(input, "command"), "验证命令"),
+    result: option(parsed.options, "result") ?? inputString(input, "result") ?? "",
+    status,
+    confirmed: true
+  };
+  const state = await runtime.app.recordVerification(verification, { ...runtime.actor(), confirmed: true });
+  await saveCurrentTask(runtime.root, taskId);
+  print(state, parsed.json, formatTask(state));
+  return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
+}
+
 async function runCheckpoint(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
   ensureAllowed(parsed, ["yes", "task", "input", "summary", "current-focus", "recent-completed", "next-action", "clear-next-action", "file", "files", "commit", "verification", "uncommitted-change", "uncommitted", "status"]);
   requireYes(parsed);
@@ -566,7 +657,11 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     if (subcommand === "update") return runTaskUpdate(nested, runtime);
     if (subcommand === "block") return runTaskBlock(nested, runtime);
     if (subcommand === "complete") return runTaskComplete(nested, runtime);
-    throw new CliInputError("usage: task-sync task create|list|use|update|block|complete");
+    if (subcommand === "decision") return runTaskDecision(nested, runtime);
+    if (subcommand === "question") return runTaskQuestion(nested, runtime);
+    if (subcommand === "error") return runTaskError(nested, runtime);
+    if (subcommand === "verify") return runTaskVerify(nested, runtime);
+    throw new CliInputError("usage: task-sync task create|list|use|update|block|complete|decision|question|error|verify");
   }
   if (parsed.command === "context") {
     ensureAllowed(parsed, ["task"]);

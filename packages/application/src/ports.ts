@@ -151,6 +151,37 @@ export interface CompleteTaskInput {
   confirmed?: boolean;
 }
 
+export interface DecisionInput {
+  taskId: string;
+  decision: string;
+  reason?: string;
+  confirmed?: boolean;
+}
+
+export interface QuestionInput {
+  taskId: string;
+  question: string;
+  resolved?: boolean;
+  answer?: string;
+  confirmed?: boolean;
+}
+
+export interface ErrorInput {
+  taskId: string;
+  error: string;
+  attempts?: string;
+  resolved?: boolean;
+  confirmed?: boolean;
+}
+
+export interface VerificationInput {
+  taskId: string;
+  command: string;
+  result: string;
+  status: VerificationResult["status"];
+  confirmed?: boolean;
+}
+
 export interface AcceptHandoffInput {
   taskId: string;
   handoffId: string;
@@ -190,6 +221,10 @@ export interface TaskSyncService {
   claimTask(input: ClaimTaskInput, actor: Actor): Promise<TaskState>;
   blockTask(input: BlockTaskInput, actor: Actor): Promise<TaskState>;
   completeTask(input: CompleteTaskInput, actor: Actor): Promise<TaskState>;
+  recordDecision(input: DecisionInput, actor: Actor): Promise<TaskState>;
+  recordQuestion(input: QuestionInput, actor: Actor): Promise<TaskState>;
+  recordError(input: ErrorInput, actor: Actor): Promise<TaskState>;
+  recordVerification(input: VerificationInput, actor: Actor): Promise<TaskState>;
   recordCheckpoint(input: CheckpointInput, actor: Actor): Promise<TaskState>;
   createHandoff(input: HandoffInput, actor: Actor): Promise<TaskState>;
   acceptHandoff(input: AcceptHandoffInput, actor: Actor): Promise<TaskState>;

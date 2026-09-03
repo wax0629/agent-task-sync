@@ -120,3 +120,36 @@ test("CLI updates, blocks, and completes a task through append-only events", asy
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
   }
 });
+
+test("CLI records decision, question, error, and verification context", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-context-records-"));
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Context records"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-1", "Context task", "--goal", "Preserve context", "--yes", "--json"], cwd), ExitCode.ok);
+
+    assert.equal(await run(["task", "decision", "task-1", "--decision", "Use JSONL", "--reason", "Mergeable facts", "--json"], cwd), ExitCode.invalidInput);
+    assert.equal(await run(["task", "decision", "task-1", "--decision", "Use JSONL", "--reason", "Mergeable facts", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "question", "task-1", "--question", "Need product confirmation?", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "question", "task-1", "--question", "Remote configured?", "--answer", "Yes", "--resolved", "true", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "error", "task-1", "--error", "Sync was rejected", "--attempts", "Pulled then retried", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "verify", "task-1", "--command", "npm test", "--result", "passed", "--status", "passed", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "verify", "task-1", "--command", "npm test", "--status", "unknown", "--yes"], cwd), ExitCode.invalidInput);
+
+    const state = (await createRuntime(cwd).app.status()).tasks[0];
+    assert.equal(state?.decisions[0]?.decision, "Use JSONL");
+    assert.equal(state?.openQuestions[0]?.resolved, false);
+    assert.equal(state?.openQuestions[1]?.answer, "Yes");
+    assert.equal(state?.openQuestions[1]?.resolved, true);
+    assert.equal(state?.knownErrors[0]?.error, "Sync was rejected");
+    assert.equal(state?.verification[0]?.command, "npm test");
+    assert.equal(state?.verification[0]?.status, "passed");
+    const taskRoot = join(cwd, ".state", "tasks", "task-1");
+    assert.match(await readFile(join(taskRoot, "task_plan.md"), "utf8"), /Need product confirmation\?|Sync was rejected|npm test/);
+    assert.match(await readFile(join(taskRoot, "progress.md"), "utf8"), /decision_recorded|question_recorded|error_recorded|verification_recorded/);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
