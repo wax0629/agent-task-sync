@@ -146,6 +146,7 @@ Git 仓库默认使用独立状态 worktree：
 | `task-sync checkpoint ... --yes` | 记录可恢复进展、文件、验证和未提交变更 |
 | `task-sync handoff create ... --yes` | 创建交接包 |
 | `task-sync handoff accept <task-id> <handoff-id> --yes` | 接受当前交接；重复接受是幂等的 |
+| `task-sync handoff check <task-id> [--json]` | 只读检查交接完整性并给出恢复建议 |
 | `task-sync rebuild [<task-id>]` | 只从事件重建投影 |
 | `task-sync sync` | pull、重建投影并 push 状态分支 |
 

@@ -200,6 +200,26 @@ test("CLI writes the complete task lifecycle and supports JSON output", async ()
   }
 });
 
+test("handoff check is a read-only CLI command with stable JSON and text output", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-handoff-check-"));
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Handoff checks"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-1", "Check task", "--goal", "Check recovery", "--yes", "--json"], cwd), ExitCode.ok);
+    const events = new FileEventStore(join(cwd, ".state"));
+    const before = await events.readTaskEvents("task-1");
+    assert.equal(await run(["handoff", "check", "task-1", "--json"], cwd), ExitCode.ok);
+    const after = await events.readTaskEvents("task-1");
+    assert.deepEqual(after.map((event) => event.eventId), before.map((event) => event.eventId));
+    assert.equal(await run(["handoff", "check", "task-1"], cwd), ExitCode.ok);
+    assert.equal(await run(["handoff", "check", "missing-task", "--json"], cwd), ExitCode.unexpected);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
+
 test("CLI updates, blocks, and completes a task through append-only events", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-task-operations-"));
   const previousStateDir = process.env.TASK_SYNC_STATE_DIR;

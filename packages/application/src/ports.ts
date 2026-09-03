@@ -54,6 +54,16 @@ export interface ProjectOverview {
   sync: SyncInspection;
 }
 
+export interface HandoffCheck {
+  taskId: string;
+  taskTitle: string;
+  taskStatus: TaskState["status"];
+  hasHandoff: boolean;
+  ready: boolean;
+  blockers: string[];
+  recommendations: string[];
+}
+
 export interface InitProjectInput {
   projectId: string;
   name: string;
@@ -279,6 +289,7 @@ export interface TaskSyncService {
   recordCheckpoint(input: CheckpointInput, actor: Actor): Promise<TaskState>;
   createHandoff(input: HandoffInput, actor: Actor): Promise<TaskState>;
   acceptHandoff(input: AcceptHandoffInput, actor: Actor): Promise<TaskState>;
+  checkHandoff(taskId: string): Promise<HandoffCheck>;
   rebuild(taskId?: string): Promise<RebuildResult>;
   sync(): Promise<SyncResult>;
   getContext(taskId: string): Promise<ContinuationContext>;

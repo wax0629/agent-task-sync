@@ -1,4 +1,4 @@
-import type { ContinuationContext, ProjectStatus, RebuildResult, SyncResult } from "@agent-task-sync/application";
+import type { ContinuationContext, HandoffCheck, ProjectStatus, RebuildResult, SyncResult } from "@agent-task-sync/application";
 import type { ConflictRecord, TaskState } from "@agent-task-sync/domain";
 
 export type TaskAttention = "active" | "handoff" | "blocked" | "conflict" | "unsynced";
@@ -76,6 +76,19 @@ export function formatTask(task: TaskState): string {
     task.handoff ? `Handoff：${task.handoff.id}` : undefined,
     task.conflicts.length ? `冲突：${task.conflicts.filter((conflict) => !conflict.resolved).length} 个待处理` : undefined
   ].filter(Boolean).join("\n");
+}
+
+export function formatHandoffCheck(check: HandoffCheck): string {
+  return [
+    `任务：${check.taskTitle} (${check.taskId})`,
+    `状态：${check.taskStatus}`,
+    `当前 handoff：${check.hasHandoff ? "有" : "无"}`,
+    `可交接：${check.ready ? "是" : "否"}`,
+    "阻断项：",
+    ...(check.blockers.length ? check.blockers.map((item) => `- ${item}`) : ["- 无"]),
+    "建议项：",
+    ...(check.recommendations.length ? check.recommendations.map((item) => `- ${item}`) : ["- 无"])
+  ].join("\n");
 }
 
 export interface ConflictListEntry extends ConflictRecord {

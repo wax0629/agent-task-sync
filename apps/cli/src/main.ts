@@ -23,7 +23,7 @@ import {
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
 import { ExitCode } from "./exit-codes.js";
-import { filterTasks, formatConflicts, formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry, type TaskAttention } from "./format.js";
+import { filterTasks, formatConflicts, formatContext, formatHandoffCheck, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry, type TaskAttention } from "./format.js";
 import { createRuntime } from "./runtime.js";
 
 interface ParsedArgs {
@@ -666,6 +666,15 @@ async function runHandoffAccept(parsed: ParsedArgs, runtime: ReturnType<typeof c
   return state.conflicts.some((conflict) => !conflict.resolved) ? ExitCode.conflict : ExitCode.ok;
 }
 
+async function runHandoffCheck(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
+  ensureAllowed(parsed, ["task"]);
+  await requireProject(runtime.app);
+  const taskId = taskIdFrom(parsed);
+  const check = await runtime.app.checkHandoff(taskId);
+  print(check, parsed.json, formatHandoffCheck(check));
+  return check.blockers.some((blocker) => blocker.includes("冲突")) ? ExitCode.conflict : ExitCode.ok;
+}
+
 async function runCommand(argv: readonly string[], cwd: string): Promise<number> {
   const parsed = parseArgs(argv);
   const runtime = createRuntime(cwd);
@@ -755,7 +764,8 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
     if (subcommand === "create") return runHandoffCreate(nested, runtime);
     if (subcommand === "accept") return runHandoffAccept(nested, runtime);
-    throw new CliInputError("usage: task-sync handoff create|accept");
+    if (subcommand === "check") return runHandoffCheck(nested, runtime);
+    throw new CliInputError("usage: task-sync handoff create|accept|check");
   }
   if (parsed.command === "rebuild") {
     ensureAllowed(parsed, ["task"]);
