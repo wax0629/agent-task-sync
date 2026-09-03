@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rmdir, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { PullResult, PushResult, SyncInspection, SyncPort } from "@agent-task-sync/application";
 import type { ProjectInfo } from "@agent-task-sync/application";
 import { ExecFileGitRunner, type GitCommandResult, type GitRunner } from "./git-runner.js";
@@ -127,9 +127,17 @@ export class FileGitSyncPort implements GitSyncPort {
   private async initializeUnlocked(): Promise<void> {
     const topLevel = await this.run(["rev-parse", "--show-toplevel"], this.options.repoRoot, "initialize");
     this.assertSuccess(topLevel, "initialize", ["rev-parse", "--show-toplevel"]);
-    await mkdir(this.worktreePath, { recursive: true });
     const existing = await stat(join(this.worktreePath, ".git")).catch(() => undefined);
     if (existing) return;
+    const worktree = await stat(this.worktreePath).catch(() => undefined);
+    if (worktree) {
+      const entries = await readdir(this.worktreePath);
+      if (entries.length > 0) {
+        throw new GitSyncError(`State worktree path exists and is not a Git worktree: ${this.worktreePath}`, "initialize", [this.worktreePath]);
+      }
+      await rmdir(this.worktreePath);
+    }
+    await mkdir(dirname(this.worktreePath), { recursive: true });
     const branchExists = await this.run(["show-ref", "--verify", "--quiet", `refs/heads/${this.stateBranch}`], this.options.repoRoot, "initialize");
     const args = branchExists.exitCode === 0
       ? ["worktree", "add", this.worktreePath, this.stateBranch]
@@ -238,7 +246,9 @@ export class FileGitSyncPort implements GitSyncPort {
 
   private lockOptions() {
     return {
-      lockPath: join(this.worktreePath, ".task-sync-sync.lock"),
+      // Keep the lock beside the target so creating it does not make an
+      // otherwise-empty worktree path look occupied to `git worktree add`.
+      lockPath: `${this.worktreePath}.lock`,
       deviceId: this.deviceId,
       ttlMs: this.lockTtlMs,
       now: () => Date.parse(this.now())
