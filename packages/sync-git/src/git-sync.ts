@@ -163,8 +163,15 @@ export class FileGitSyncPort implements GitSyncPort {
       if (remoteBranch.exitCode === 0) {
         const merge = await this.run(["merge", "--no-edit", remoteRef], this.worktreePath, "pull");
         if (merge.exitCode !== 0) {
-          if (await this.hasTextConflict()) throw new GitTextConflictError("pull", merge.stderr);
-          this.assertSuccess(merge, "pull", ["merge", "--no-edit", remoteRef]);
+          const projectionsResolved = await this.resolveProjectionConflicts();
+          if (projectionsResolved) {
+            // Projection files are derived from events; the next rebuild will
+            // regenerate them from the merged event set.
+          } else if (await this.hasTextConflict()) {
+            throw new GitTextConflictError("pull", merge.stderr);
+          } else {
+            this.assertSuccess(merge, "pull", ["merge", "--no-edit", remoteRef]);
+          }
         }
       }
     }
@@ -242,6 +249,24 @@ export class FileGitSyncPort implements GitSyncPort {
   private async hasTextConflict(): Promise<boolean> {
     const result = await this.run(["diff", "--name-only", "--diff-filter=U"], this.worktreePath, "status");
     return result.exitCode === 0 && result.stdout.trim().length > 0;
+  }
+
+  private async resolveProjectionConflicts(): Promise<boolean> {
+    const conflicts = await this.run(["diff", "--name-only", "--diff-filter=U"], this.worktreePath, "pull");
+    if (conflicts.exitCode !== 0) return false;
+    const paths = conflicts.stdout.split(/\r?\n/).map((path) => path.trim()).filter(Boolean);
+    if (!paths.length) return false;
+    const projectionPaths = paths.filter((path) => path.startsWith(".task-sync/") && !path.includes("/events/") && !path.endsWith(".jsonl"));
+    // Event files are facts and must remain a visible conflict if the same
+    // writer path was modified concurrently. Only derived projections can be
+    // replaced safely before ApplicationService rebuilds them.
+    if (projectionPaths.length !== paths.length) return false;
+    const checkout = await this.run(["checkout", "--theirs", "--", ...projectionPaths], this.worktreePath, "pull");
+    if (checkout.exitCode !== 0) return false;
+    const add = await this.run(["add", "--", ...projectionPaths], this.worktreePath, "pull");
+    if (add.exitCode !== 0) return false;
+    const commit = await this.run(["commit", "--no-edit"], this.worktreePath, "pull");
+    return commit.exitCode === 0;
   }
 
   private lockOptions() {
