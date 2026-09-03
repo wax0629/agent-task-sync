@@ -23,8 +23,8 @@ import {
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
 import { ExitCode } from "./exit-codes.js";
-import { filterTasks, formatConflicts, formatContext, formatHandoffCheck, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry, type TaskAttention } from "./format.js";
-import { createRuntime } from "./runtime.js";
+import { filterTasks, formatConflicts, formatContext, formatDoctor, formatHandoffCheck, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry, type TaskAttention } from "./format.js";
+import { createRuntime, inspectRuntime } from "./runtime.js";
 
 interface ParsedArgs {
   command?: string;
@@ -714,9 +714,9 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
   }
   if (parsed.command === "doctor") {
     ensureAllowed(parsed, []);
-    const status = await runtime.app.status();
-    print({ ok: Boolean(status.project), root: runtime.root }, parsed.json, status.project ? `状态目录正常：${runtime.root}` : "尚未初始化");
-    return status.project ? ExitCode.ok : ExitCode.uninitialized;
+    const report = await inspectRuntime(runtime);
+    print(report, parsed.json, formatDoctor(report));
+    return report.ok ? ExitCode.ok : ExitCode.uninitialized;
   }
   if (parsed.command === "conflicts") return runConflicts(parsed, runtime);
   if (parsed.command === "conflict") {

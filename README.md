@@ -35,6 +35,47 @@ npm link --workspace=@agent-task-sync/adapter-claude-code
 npm link --workspace=@agent-task-sync/adapter-pi
 ```
 
+## 首次安装与诊断
+
+当前 CLI 尚未发布到 npm。首次使用时从仓库构建并链接本地命令：
+
+```bash
+git clone https://github.com/wax0629/agent-task-sync.git
+cd agent-task-sync
+npm install
+npm run build
+npm link --workspace=@agent-task-sync/cli
+npm link --workspace=@agent-task-sync/adapter-codex
+npm link --workspace=@agent-task-sync/adapter-claude-code
+npm link --workspace=@agent-task-sync/adapter-pi
+```
+
+进入要同步的代码仓库后先做只读诊断：
+
+```bash
+cd /path/to/your/repository
+task-sync doctor --json
+```
+
+诊断通过后再初始化项目：
+
+```bash
+task-sync init <project-id> "项目名称"
+task-sync doctor
+task-sync status --json
+```
+
+`doctor` 会显示运行模式、状态根目录、Git 状态 worktree、项目清单和每项检查的下一步。它是只读命令，不创建任务、不写事件，也不会初始化状态 worktree。
+
+常见情况：
+
+- `task-sync: command not found`：回到 Agent Task Sync 源码目录重新执行 `npm run build` 和 `npm link --workspace=@agent-task-sync/cli`；也可以临时使用 `node /path/to/agent-task-sync/apps/cli/dist/main.js ...`。
+- 显示“项目尚未初始化”：在目标代码仓库执行 `task-sync init <project-id> "项目名称"`。
+- 显示 `mock/offline`：当前目录不是 Git 仓库，或设置了 `TASK_SYNC_STATE_DIR`；这种模式可本地读写，但不会跨设备推送状态。
+- 显示状态 worktree 路径冲突：先备份并移走该非 worktree 目录，再重新运行 `task-sync init`；CLI 不会自动删除目录。
+- 显示未配置 Git remote：本地状态仍保留；需要跨设备时为代码仓库配置 `origin`，然后运行 `task-sync sync`。
+- 显示远程领先：先运行 `task-sync sync`，确认 `status` 不再报告远程领先后再写 checkpoint/handoff。
+
 统一 Skill 的唯一入口是 [`skills/agent-task-sync/SKILL.md`](skills/agent-task-sync/SKILL.md)。将整个 `skills/agent-task-sync` 目录复制到目标 Agent 的 Skill 目录即可；Codex 默认位置是 `~/.codex/skills/agent-task-sync/`。Skill 规定各 Agent 共用的读取、确认、交接和安全边界，适配器只负责平台生命周期 Hook，CLI 仍是唯一写入入口。
 
 安装后先在项目目录验证只读链路：

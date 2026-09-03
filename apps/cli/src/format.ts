@@ -1,5 +1,6 @@
 import type { ContinuationContext, HandoffCheck, ProjectStatus, RebuildResult, SyncResult } from "@agent-task-sync/application";
 import type { ConflictRecord, TaskState } from "@agent-task-sync/domain";
+import type { DoctorReport } from "./runtime.js";
 
 export type TaskAttention = "active" | "handoff" | "blocked" | "conflict" | "unsynced";
 
@@ -34,6 +35,24 @@ export function formatStatus(status: ProjectStatus): string {
     .filter(Boolean)
     .join(" · ");
   return [`项目：${project}`, sync, "任务：", tasks].join("\n");
+}
+
+export function formatDoctor(report: DoctorReport): string {
+  const mode = report.mode === "git-worktree" ? "Git 状态 worktree" : "本地 mock/offline";
+  const project = report.project ? `${report.project.name} (${report.project.projectId})` : "未初始化";
+  const checks = report.checks.map((check) => {
+    const marker = check.status === "passed" ? "通过" : check.status === "warning" ? "提示" : "失败";
+    return `- [${marker}] ${check.message}${check.nextStep ? ` 下一步：${check.nextStep}` : ""}`;
+  }).join("\n");
+  return [
+    `项目：${project}`,
+    `运行模式：${mode}`,
+    `状态目录：${report.root}`,
+    report.state.worktreePath ? `状态 worktree：${report.state.worktreePath}` : undefined,
+    report.state.stateBranch ? `状态分支：${report.state.stateBranch}` : undefined,
+    "检查：",
+    checks
+  ].filter((line): line is string => line !== undefined).join("\n");
 }
 
 export function formatContext(context: ContinuationContext): string {
