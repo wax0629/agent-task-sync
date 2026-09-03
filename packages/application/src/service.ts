@@ -5,6 +5,10 @@ import {
   type EventPayload,
   type HandoffAcceptedPayload,
   type HandoffCreatedPayload,
+  type DecisionRecordedPayload,
+  type QuestionRecordedPayload,
+  type ErrorRecordedPayload,
+  type VerificationRecordedPayload,
   type TaskClaimedPayload,
   type TaskCreatedPayload,
   type TaskEvent,
@@ -22,6 +26,8 @@ import type {
   CompleteTaskInput,
   ContinuationContext,
   CreateTaskInput,
+  DecisionInput,
+  ErrorInput,
   EventStore,
   HandoffInput,
   InitProjectInput,
@@ -30,12 +36,14 @@ import type {
   ProjectRegistry,
   ProjectStatus,
   ProjectionStore,
+  QuestionInput,
   RebuildResult,
   RenderedDocuments,
   SyncInspection,
   SyncPort,
   SyncResult,
   UpdateTaskInput,
+  VerificationInput,
   TaskSyncService
 } from "./ports.js";
 
@@ -169,6 +177,54 @@ export class ApplicationService implements TaskSyncService {
     const current = this.reduceOne(events);
     const payload: TaskCompletedPayload = { summary: input.summary };
     await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_completed", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async recordDecision(input: DecisionInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: DecisionRecordedPayload = { decision: input.decision, reason: input.reason };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "decision_recorded", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async recordQuestion(input: QuestionInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: QuestionRecordedPayload = {
+      question: input.question,
+      resolved: input.resolved,
+      answer: input.answer
+    };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "question_recorded", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async recordError(input: ErrorInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: ErrorRecordedPayload = {
+      error: input.error,
+      attempts: input.attempts,
+      resolved: input.resolved
+    };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "error_recorded", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async recordVerification(input: VerificationInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: VerificationRecordedPayload = {
+      command: input.command,
+      result: input.result,
+      status: input.status
+    };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "verification_recorded", payload, actor, this.heads(events)));
     return this.rebuildOne(input.taskId);
   }
 

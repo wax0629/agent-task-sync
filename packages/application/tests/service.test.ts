@@ -170,6 +170,33 @@ test("task lifecycle updates append events and rebuild every projection", async 
   assert.match(projections.documents.get("task-1")?.taskPlan ?? "", /Updated task/);
 });
 
+test("context records append decision, question, error, and verification events", async () => {
+  const { app, events, projections } = service();
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ taskId: "task-1", projectId: "project-1", title: "Context task", goal: "Preserve high-value context", confirmed: true }, actor);
+  await assert.rejects(
+    app.recordDecision({ taskId: "task-1", decision: "Must not write", confirmed: false }, actor),
+    ConfirmationRequiredError
+  );
+
+  await app.recordDecision({ taskId: "task-1", decision: "Use JSONL as the source of truth", reason: "It merges across devices", confirmed: true }, actor);
+  await app.recordQuestion({ taskId: "task-1", question: "Should the first release include a web UI?", confirmed: true }, actor);
+  await app.recordQuestion({ taskId: "task-1", question: "Is the state branch remote-backed?", answer: "Yes, when the repository has a remote.", resolved: true, confirmed: true }, actor);
+  await app.recordError({ taskId: "task-1", error: "The first sync attempt was rejected", attempts: "Pulled and retried without force push", confirmed: true }, actor);
+  const state = await app.recordVerification({ taskId: "task-1", command: "npm test", result: "All tests passed", status: "passed", confirmed: true }, actor);
+
+  assert.equal(events.values.map((event) => event.type).slice(-5).join(","), "decision_recorded,question_recorded,question_recorded,error_recorded,verification_recorded");
+  assert.equal(state.decisions[0]?.decision, "Use JSONL as the source of truth");
+  assert.equal(state.decisions[0]?.reason, "It merges across devices");
+  assert.equal(state.openQuestions[0]?.resolved, false);
+  assert.equal(state.openQuestions[1]?.resolved, true);
+  assert.equal(state.openQuestions[1]?.answer, "Yes, when the repository has a remote.");
+  assert.equal(state.knownErrors[0]?.attempts, "Pulled and retried without force push");
+  assert.equal(state.verification[0]?.status, "passed");
+  const documents = projections.documents.get("task-1");
+  assert.equal(documents?.taskPlan, "# Context task\n\nNext: none");
+});
+
 test("sync always goes through SyncPort and rebuilds before push", async () => {
   const { app, sync } = service();
   await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
