@@ -4,7 +4,8 @@ import type {
   AgentAdapter,
   CliInvocation,
   CliResult,
-  HookInput
+  HookInput,
+  HookName
 } from "./types.js";
 import { checkpointInvocation, contextInvocation, handoffInvocation, statusInvocation } from "./cli-contract.js";
 
@@ -21,7 +22,7 @@ function errorMessage(result: CliResult): string {
   return result.stderr.trim() || `task-sync exited with code ${result.exitCode}`;
 }
 
-function result(hook: AdapterHookResult["hook"], invocations: CliInvocation[], value: Partial<AdapterHookResult> = {}): AdapterHookResult {
+function result(hook: HookName, invocations: CliInvocation[], value: Partial<AdapterHookResult> = {}): AdapterHookResult {
   return { continue: true, hook, invocations, ...value };
 }
 
@@ -36,7 +37,7 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
     return options.executor.run(invocation);
   }
 
-  async function safe(hook: AdapterHookResult["hook"], operation: () => Promise<AdapterHookResult>): Promise<AdapterHookResult> {
+  async function safe(hook: HookName, operation: () => Promise<AdapterHookResult>): Promise<AdapterHookResult> {
     try {
       return await operation();
     } catch (error) {
@@ -95,21 +96,21 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
     },
 
     async handoff(input: HookInput): Promise<AdapterHookResult> {
-      return safe("stop", async () => {
+      return safe("handoff", async () => {
         if (!input.taskId || !input.handoffInputFile) {
-          return result("stop", [], { warning: "No handoff candidate supplied; no persistent write was attempted." });
+          return result("handoff", [], { warning: "No handoff candidate supplied; no persistent write was attempted." });
         }
         const invocation = handoffInvocation({ taskId: input.taskId, inputFile: input.handoffInputFile, confirmed: input.confirmed }, input.cwd, executable);
         if (!input.confirmed) {
-          return result("stop", [invocation], {
+          return result("handoff", [invocation], {
             requiresConfirmation: true,
             warning: "Handoff candidate is ready; user confirmation is required before writing."
           });
         }
         const handoffResult = await execute({ ...invocation, env: input.environment });
         return successful(handoffResult)
-          ? result("stop", [invocation], { output: output(handoffResult) })
-          : result("stop", [invocation], { warning: errorMessage(handoffResult) });
+          ? result("handoff", [invocation], { output: output(handoffResult) })
+          : result("handoff", [invocation], { warning: errorMessage(handoffResult) });
       });
     }
   };

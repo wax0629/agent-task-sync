@@ -1,20 +1,12 @@
 import { createPiAdapter } from "./index.js";
-import type { HookInput } from "@agent-task-sync/adapter-contract";
+import { runHook } from "@agent-task-sync/adapter-contract";
 
-async function readInput(): Promise<HookInput> {
+async function readInput(): Promise<string> {
   let text = "";
   for await (const chunk of process.stdin) text += chunk.toString();
-  return text.trim() ? JSON.parse(text) as HookInput : { cwd: process.cwd() };
+  return text;
 }
 
-const input = await readInput();
-const hook = process.argv[2] ?? "session_start";
 const adapter = createPiAdapter();
-const result = hook === "session_start"
-  ? await adapter.sessionStart(input)
-  : hook === "pre_compact"
-    ? await adapter.preCompact(input)
-    : hook === "handoff"
-      ? await adapter.handoff(input)
-      : await adapter.stop(input);
+const result = await runHook(adapter, process.argv[2] ?? "session_start", await readInput(), process.cwd());
 process.stdout.write(`${JSON.stringify(result)}\n`);
