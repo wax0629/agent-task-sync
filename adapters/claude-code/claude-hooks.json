@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-task-sync.dev/schema/claude-hooks.v1.json",
+  "description": "Agent Task Sync Claude Code hook skeleton. Hooks call the shared CLI and never write state directly.",
+  "hooks": {
+    "SessionStart": [{ "type": "command", "command": "task-sync-adapter-claude session_start" }],
+    "PreCompact": [{ "type": "command", "command": "task-sync-adapter-claude pre_compact" }],
+    "Stop": [{ "type": "command", "command": "task-sync-adapter-claude stop" }]
+  },
+  "input": "JSON on stdin: { cwd, taskId?, checkpointInputFile?, confirmed? }",
+  "confirmation": "checkpoint and handoff writes require an explicit confirmed=true input"
+}

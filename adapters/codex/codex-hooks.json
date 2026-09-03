@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-task-sync.dev/schema/codex-hooks.v1.json",
+  "description": "Agent Task Sync Codex hook skeleton. Hooks call the shared CLI and never write state directly.",
+  "hooks": {
+    "SessionStart": "task-sync-adapter-codex session_start",
+    "PreCompact": "task-sync-adapter-codex pre_compact",
+    "Stop": "task-sync-adapter-codex stop"
+  },
+  "input": "JSON on stdin: { cwd, taskId?, checkpointInputFile?, confirmed? }",
+  "confirmation": "checkpoint and handoff writes require an explicit confirmed=true input"
+}
