@@ -1,0 +1,5 @@
+defaultBranch: main
+name: Demo
+projectId: demo
+protocolVersion: 1
+rootPath: /Users/apple/agent-task-sync
