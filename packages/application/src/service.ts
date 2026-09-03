@@ -33,6 +33,9 @@ import type {
   InitProjectInput,
   MarkdownRenderer,
   ProjectInfo,
+  ProjectActivity,
+  ProjectOverview,
+  ProjectTaskSummary,
   ProjectRegistry,
   ProjectStatus,
   ProjectionStore,
@@ -47,6 +50,58 @@ import type {
   VerificationInput,
   TaskSyncService
 } from "./ports.js";
+
+const taskStatuses: TaskState["status"][] = [
+  "planned",
+  "in_progress",
+  "blocked",
+  "needs_review",
+  "handoff_ready",
+  "completed",
+  "archived"
+];
+
+function compact(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return fallback;
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
+}
+
+function activitySummary(event: TaskEvent): string {
+  const payload = event.payload as Record<string, unknown>;
+  if (typeof payload.summary === "string" && payload.summary.trim()) return compact(payload.summary, event.type);
+  switch (event.type) {
+    case "task_created":
+      return `创建任务：${compact(payload.title, "未命名任务")}`;
+    case "task_updated":
+      return "更新任务信息";
+    case "task_claimed":
+      return payload.released ? "释放任务认领" : `认领任务：${compact(payload.agentId, event.writer.agentId)}`;
+    case "checkpoint_recorded":
+      return compact(payload.currentFocus, "记录 checkpoint");
+    case "decision_recorded":
+      return `记录决策：${compact(payload.decision, "未命名决策")}`;
+    case "question_recorded":
+      return `记录问题：${compact(payload.question, "未命名问题")}`;
+    case "error_recorded":
+      return `记录错误：${compact(payload.error, "未命名错误")}`;
+    case "verification_recorded":
+      return `验证：${compact(payload.command, "未命名命令")}（${compact(payload.status, "未记录状态")}）`;
+    case "handoff_created":
+      return `创建交接：${compact(payload.handoffId, `handoff-${event.eventId}`)}`;
+    case "handoff_accepted":
+      return `接受交接：${compact(payload.handoffId, "未命名交接")}`;
+    case "task_blocked":
+      return `任务阻塞：${compact(payload.reason, "未记录原因")}`;
+    case "task_completed":
+      return `任务完成：${compact(payload.summary, "未记录摘要")}`;
+    case "conflict_resolved":
+      return `解析冲突：${compact(payload.conflictId, "未命名冲突")}`;
+    default:
+      return event.type;
+  }
+}
 
 export interface ApplicationDependencies {
   events: EventStore;
@@ -119,12 +174,18 @@ export class ApplicationService implements TaskSyncService {
     const sync = await this.dependencies.sync.inspect();
     const tasks = this.reduceTasks(events).map((state) => this.withSyncSummary(state, sync));
     const semanticConflict = tasks.some((state) => state.conflicts.some((conflict) => !conflict.resolved));
+    const effectiveSync = semanticConflict ? { ...sync, conflict: true } : sync;
     if (semanticConflict) {
       for (const task of tasks) {
         if (task.conflicts.some((conflict) => !conflict.resolved)) task.sync.conflict = true;
       }
     }
-    return { project, tasks, sync: semanticConflict ? { ...sync, conflict: true } : sync };
+    return {
+      project,
+      tasks,
+      sync: effectiveSync,
+      overview: project ? this.buildProjectOverview(project, tasks, events, effectiveSync) : undefined
+    };
   }
 
   async createTask(input: CreateTaskInput, actor: Actor): Promise<TaskState> {
@@ -350,11 +411,17 @@ export class ApplicationService implements TaskSyncService {
   }
 
   private async rebuildInternal(taskId?: string, inspection?: SyncInspection): Promise<RebuildResult> {
-    if (taskId) return { taskIds: [taskId], states: [await this.rebuildOne(taskId, inspection)] };
+    const effectiveInspection = inspection ?? await this.dependencies.sync.inspect();
+    if (taskId) {
+      const state = await this.rebuildOne(taskId, effectiveInspection, false);
+      await this.rebuildProjectProgress(effectiveInspection);
+      return { taskIds: [taskId], states: [state] };
+    }
     const project = await this.dependencies.registry.current();
     const events = await this.dependencies.events.readProjectEvents(project?.projectId);
     const taskIds = [...new Set(events.map((event) => event.taskId))].sort();
-    const states = await Promise.all(taskIds.map((id) => this.rebuildOne(id, inspection)));
+    const states = await Promise.all(taskIds.map((id) => this.rebuildOne(id, effectiveInspection, false)));
+    await this.rebuildProjectProgress(effectiveInspection);
     return { taskIds, states };
   }
 
@@ -386,14 +453,82 @@ export class ApplicationService implements TaskSyncService {
     };
   }
 
-  private async rebuildOne(taskId: string, inspection?: SyncInspection): Promise<TaskState> {
+  private async rebuildOne(taskId: string, inspection?: SyncInspection, writeProject = true): Promise<TaskState> {
     const events = await this.dependencies.events.readTaskEvents(taskId);
     const state = this.reduceOne(events);
-    this.withSyncSummary(state, inspection ?? await this.dependencies.sync.inspect());
+    const effectiveInspection = inspection ?? await this.dependencies.sync.inspect();
+    this.withSyncSummary(state, effectiveInspection);
     const documents = this.dependencies.renderer.render(state, events);
     await this.dependencies.projections.writeTaskState(state);
     await this.dependencies.projections.writeMarkdown(taskId, documents);
+    if (writeProject) await this.rebuildProjectProgress(effectiveInspection);
     return state;
+  }
+
+  private async rebuildProjectProgress(inspection?: SyncInspection): Promise<ProjectOverview | undefined> {
+    const project = await this.dependencies.registry.current();
+    if (!project) return undefined;
+    const events = await this.dependencies.events.readProjectEvents(project.projectId);
+    const effectiveInspection = inspection ?? await this.dependencies.sync.inspect();
+    const tasks = this.reduceTasks(events).map((state) => this.withSyncSummary(state, effectiveInspection));
+    const semanticConflict = tasks.some((state) => state.conflicts.some((conflict) => !conflict.resolved));
+    const effectiveSync = semanticConflict ? { ...effectiveInspection, conflict: true } : effectiveInspection;
+    if (semanticConflict) {
+      for (const task of tasks) {
+        if (task.conflicts.some((conflict) => !conflict.resolved)) task.sync.conflict = true;
+      }
+    }
+    const overview = this.buildProjectOverview(project, tasks, events, effectiveSync);
+    await this.dependencies.projections.writeProjectMarkdown(this.dependencies.renderer.renderProject(overview));
+    return overview;
+  }
+
+  private buildProjectOverview(
+    project: ProjectInfo,
+    tasks: readonly TaskState[],
+    events: readonly TaskEvent[],
+    sync: SyncInspection
+  ): ProjectOverview {
+    const statusCounts = Object.fromEntries(taskStatuses.map((status) => [status, 0])) as Record<TaskState["status"], number>;
+    const taskSummaries: ProjectTaskSummary[] = tasks
+      .map((task) => {
+        statusCounts[task.status] += 1;
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          currentFocus: task.currentFocus,
+          nextAction: task.nextAction,
+          updatedAt: task.updatedAt,
+          pendingHandoff: Boolean(task.handoff && !task.handoff.acceptedAt),
+          unresolvedConflictCount: task.conflicts.filter((conflict) => !conflict.resolved).length
+        } satisfies ProjectTaskSummary;
+      })
+      .sort((left, right) => `${right.updatedAt}:${right.id}`.localeCompare(`${left.updatedAt}:${left.id}`));
+    const orderedEvents = [...events].sort((left, right) => `${left.createdAt}:${left.eventId}`.localeCompare(`${right.createdAt}:${right.eventId}`));
+    const titles = new Map(tasks.map((task) => [task.id, task.title]));
+    const recentActivity: ProjectActivity[] = orderedEvents.slice(-10).reverse().map((event) => ({
+      eventId: event.eventId,
+      taskId: event.taskId,
+      taskTitle: titles.get(event.taskId) ?? event.taskId,
+      type: event.type,
+      createdAt: event.createdAt,
+      agentId: event.writer.agentId,
+      deviceId: event.writer.deviceId,
+      summary: activitySummary(event)
+    }));
+    return {
+      projectId: project.projectId,
+      projectName: project.name,
+      taskCount: tasks.length,
+      statusCounts,
+      pendingHandoffCount: taskSummaries.filter((task) => task.pendingHandoff).length,
+      unresolvedConflictCount: taskSummaries.reduce((total, task) => total + task.unresolvedConflictCount, 0),
+      lastActivityAt: orderedEvents.at(-1)?.createdAt,
+      recentActivity,
+      tasks: taskSummaries,
+      sync
+    };
   }
 
   private reduceTasks(events: readonly TaskEvent[]): TaskState[] {

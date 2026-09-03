@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -33,6 +33,46 @@ test("status and invalid input return explicit exit codes", async () => {
   try {
     assert.equal(await run(["status"], cwd), ExitCode.uninitialized);
     assert.equal(await run(["context"], cwd), ExitCode.invalidInput);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
+
+test("CLI rebuilds a project progress projection and exposes overview counts", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-project-overview-"));
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Overview"], cwd), ExitCode.ok);
+    assert.equal(await run(["rebuild", "--json"], cwd), ExitCode.ok);
+    assert.match(await readFile(join(cwd, ".state", "progress.md"), "utf8"), /任务总数：0/);
+
+    assert.equal(await run(["task", "create", "task-1", "Active task", "--goal", "Continue work", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["checkpoint", "--task", "task-1", "--current-focus", "Implement overview", "--next-action", "Run tests", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-2", "Handoff task", "--goal", "Prepare handoff", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["handoff", "create", "--task", "task-2", "--next-step", "Continue on Windows", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-3", "Blocked task", "--goal", "Unblock dependency", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "block", "task-3", "--reason", "Waiting for review", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-4", "Completed task", "--goal", "Ship result", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "complete", "task-4", "--summary", "Shipped", "--yes", "--json"], cwd), ExitCode.ok);
+
+    const status = await createRuntime(cwd).app.status();
+    assert.equal(status.overview?.taskCount, 4);
+    assert.equal(status.overview?.statusCounts.in_progress, 1);
+    assert.equal(status.overview?.statusCounts.handoff_ready, 1);
+    assert.equal(status.overview?.statusCounts.blocked, 1);
+    assert.equal(status.overview?.statusCounts.completed, 1);
+    assert.equal(status.overview?.pendingHandoffCount, 1);
+    assert.ok((status.overview?.recentActivity.length ?? 0) <= 10);
+    const projectMarkdown = await readFile(join(cwd, ".state", "progress.md"), "utf8");
+    assert.match(projectMarkdown, /项目进度：Overview/);
+    assert.match(projectMarkdown, /待处理 handoff：1/);
+    assert.match(projectMarkdown, /任务阻塞：Waiting for review/);
+
+    await unlink(join(cwd, ".state", "progress.md"));
+    assert.equal(await run(["rebuild", "--json"], cwd), ExitCode.ok);
+    assert.match(await readFile(join(cwd, ".state", "progress.md"), "utf8"), /任务总数：4/);
   } finally {
     if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;

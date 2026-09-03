@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -86,23 +86,28 @@ test("complete checkpoint and handoff fixture rebuilds all four projections with
   assert.equal(firstState?.handoff?.acceptedBy?.deviceId, "windows");
 
   const filesBefore = await Promise.all([
+    readFile(join(root, "progress.md"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "task.yaml"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "task_plan.md"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "progress.md"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "handoff.md"), "utf8")
   ]);
-  assert.match(filesBefore[0], /uncommittedChanges/);
-  assert.match(filesBefore[0], /handoff-fixture-1/);
-  assert.match(filesBefore[1], /交接 ID：handoff-fixture-1/);
-  assert.match(filesBefore[1], /未提交变更：/);
-  assert.match(filesBefore[2], /创建交接 handoff-fixture-1/);
-  assert.match(filesBefore[2], /接受交接 handoff-fixture-1/);
-  assert.match(filesBefore[3], /Events remain the source of truth/);
-  assert.match(filesBefore[3], /接受时间：2026-09-03T04:00:00.000Z/);
+  assert.match(filesBefore[0], /项目进度：Fixture project/);
+  assert.match(filesBefore[0], /待交接：0/);
+  assert.match(filesBefore[1], /uncommittedChanges/);
+  assert.match(filesBefore[1], /handoff-fixture-1/);
+  assert.match(filesBefore[2], /交接 ID：handoff-fixture-1/);
+  assert.match(filesBefore[2], /未提交变更：/);
+  assert.match(filesBefore[3], /创建交接 handoff-fixture-1/);
+  assert.match(filesBefore[3], /接受交接 handoff-fixture-1/);
+  assert.match(filesBefore[4], /Events remain the source of truth/);
+  assert.match(filesBefore[4], /接受时间：2026-09-03T04:00:00.000Z/);
 
   const eventsBefore = await runtime.events.readTaskEvents("checkpoint-handoff-task");
+  await unlink(join(root, "progress.md"));
   const second = await runtime.app.rebuild("checkpoint-handoff-task");
   const filesAfter = await Promise.all([
+    readFile(join(root, "progress.md"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "task.yaml"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "task_plan.md"), "utf8"),
     readFile(join(root, "tasks", "checkpoint-handoff-task", "progress.md"), "utf8"),

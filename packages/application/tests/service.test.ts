@@ -11,6 +11,7 @@ import type {
   InitProjectInput,
   MarkdownRenderer,
   ProjectInfo,
+  ProjectOverview,
   ProjectRegistry,
   ProjectionStore,
   RenderedDocuments,
@@ -38,6 +39,7 @@ class MemoryEvents implements EventStore {
 class MemoryProjections implements ProjectionStore {
   readonly states: TaskState[] = [];
   readonly documents = new Map<string, RenderedDocuments>();
+  projectMarkdown?: string;
 
   async writeTaskState(state: TaskState): Promise<void> {
     this.states.push(state);
@@ -45,6 +47,10 @@ class MemoryProjections implements ProjectionStore {
 
   async writeMarkdown(taskId: string, documents: RenderedDocuments): Promise<void> {
     this.documents.set(taskId, documents);
+  }
+
+  async writeProjectMarkdown(markdown: string): Promise<void> {
+    this.projectMarkdown = markdown;
   }
 }
 
@@ -64,6 +70,10 @@ class MemoryRegistry implements ProjectRegistry {
 class FakeRenderer implements MarkdownRenderer {
   render(state: TaskState): RenderedDocuments {
     return { taskPlan: `# ${state.title}\n\nNext: ${state.nextAction ?? "none"}`, progress: "" };
+  }
+
+  renderProject(overview: ProjectOverview): string {
+    return `# ${overview.projectName}\n\nTasks: ${overview.taskCount}`;
   }
 }
 
@@ -117,8 +127,11 @@ test("init, createTask, status, and context use application ports", async () => 
   assert.equal(state.status, "planned");
   assert.equal(events.values[0]?.type, "task_created");
   assert.equal(projections.documents.has("task-1"), true);
+  assert.match(projections.projectMarkdown ?? "", /Tasks: 1/);
   const status = await app.status();
   assert.equal(status.tasks[0]?.id, "task-1");
+  assert.equal(status.overview?.taskCount, 1);
+  assert.equal(status.overview?.statusCounts.planned, 1);
   const context = await app.getContext("task-1");
   assert.match(context.markdown, /Demo task/);
   assert.deepEqual(sync.calls, ["inspect", "inspect", "inspect"]);
@@ -293,6 +306,9 @@ test("status and context project sync inspection into task summaries and warning
   const status = await app.status();
   assert.equal(status.tasks[0]?.sync.unsyncedEventCount, 2);
   assert.equal(status.tasks[0]?.sync.remoteAhead, true);
+  assert.equal(status.overview?.taskCount, 1);
+  assert.equal(status.overview?.statusCounts.planned, 1);
+  assert.equal(status.overview?.sync.conflict, true);
   const context = await app.getContext("task-1");
   assert.match(context.warning ?? "", /远程有更新/);
   assert.match(context.warning ?? "", /尚未同步/);

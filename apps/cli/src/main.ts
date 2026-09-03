@@ -675,6 +675,7 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
       remoteUrl: option(parsed.options, "remote"),
       defaultBranch: option(parsed.options, "default-branch") ?? "main"
     });
+    await runtime.app.rebuild();
     if (typeof runtime.sync.initialize === "function") {
       try {
         await runtime.sync.push();

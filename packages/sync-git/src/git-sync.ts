@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rmdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rmdir, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { PullResult, PushResult, SyncInspection, SyncPort } from "@agent-task-sync/application";
 import type { ProjectInfo } from "@agent-task-sync/application";
@@ -161,6 +161,7 @@ export class FileGitSyncPort implements GitSyncPort {
       const remoteRef = `${this.remoteName}/${this.stateBranch}`;
       const remoteBranch = await this.run(["rev-parse", "--verify", remoteRef], this.worktreePath, "pull");
       if (remoteBranch.exitCode === 0) {
+        await this.restoreDerivedProjectionChanges();
         const merge = await this.run(["merge", "--no-edit", remoteRef], this.worktreePath, "pull");
         if (merge.exitCode !== 0) {
           const projectionsResolved = await this.resolveProjectionConflicts();
@@ -269,6 +270,26 @@ export class FileGitSyncPort implements GitSyncPort {
     return commit.exitCode === 0;
   }
 
+  private async restoreDerivedProjectionChanges(): Promise<void> {
+    const status = await this.run(["status", "--porcelain", "--untracked-files=all", "--", ".task-sync"], this.worktreePath, "pull");
+    this.assertSuccess(status, "pull", ["status", "--porcelain", "--untracked-files=all", "--", ".task-sync"]);
+    const entries = status.stdout
+      .split(/\r?\n/)
+      .map((line) => ({ code: line.slice(0, 2), path: line.slice(3).trim() }))
+      .filter((entry) => entry.path && isDerivedProjection(entry.path));
+    if (!entries.length) return;
+    const tracked = entries.filter((entry) => entry.code !== "??").map((entry) => entry.path);
+    if (tracked.length) {
+      const restore = await this.run(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked], this.worktreePath, "pull");
+      this.assertSuccess(restore, "pull", ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]);
+    }
+    for (const entry of entries.filter((candidate) => candidate.code === "??")) {
+      await unlink(join(this.worktreePath, entry.path)).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      });
+    }
+  }
+
   private lockOptions() {
     return {
       // Keep the lock beside the target so creating it does not make an
@@ -291,6 +312,11 @@ export class FileGitSyncPort implements GitSyncPort {
       throw new GitSyncError(`Git ${operation} failed${result.stderr ? `: ${result.stderr.trim()}` : ""}`, operation, args, result.exitCode, result.stderr);
     }
   }
+}
+
+function isDerivedProjection(path: string): boolean {
+  return path === ".task-sync/progress.md"
+    || /^\.task-sync\/tasks\/[^/]+\/(task\.yaml|task_plan\.md|progress\.md|handoff\.md)$/.test(path);
 }
 
 async function countEventLines(root: string): Promise<number> {

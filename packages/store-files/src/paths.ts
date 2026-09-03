@@ -11,6 +11,10 @@ export function taskDirectory(rootDir: string, taskId: string): string {
   return join(rootDir, "tasks", assertSafeSegment(taskId, "task id"));
 }
 
+export function projectProgressPath(rootDir: string): string {
+  return join(rootDir, "progress.md");
+}
+
 export function eventFile(rootDir: string, event: { taskId: string; writer: { deviceId: string; agentId: string; sessionId: string } }): string {
   return join(
     taskDirectory(rootDir, event.taskId),
