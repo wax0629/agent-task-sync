@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-task-sync.dev/schema/pi-hooks.v1.json",
+  "description": "Agent Task Sync Pi hook configuration. Hooks call the shared CLI and never write state directly.",
+  "hooks": {
+    "session_start": "task-sync-adapter-pi session_start",
+    "pre_compact": "task-sync-adapter-pi pre_compact",
+    "stop": "task-sync-adapter-pi stop",
+    "handoff": "task-sync-adapter-pi handoff"
+  },
+  "input": "JSON on stdin: { cwd, taskId?, checkpointInputFile?, handoffInputFile?, confirmed? }",
+  "confirmation": "checkpoint and handoff writes require an explicit confirmed=true input"
+}

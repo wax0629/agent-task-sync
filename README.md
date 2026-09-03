@@ -32,6 +32,7 @@ node apps/cli/dist/main.js status --json
 npm link --workspace=@agent-task-sync/cli
 npm link --workspace=@agent-task-sync/adapter-codex
 npm link --workspace=@agent-task-sync/adapter-claude-code
+npm link --workspace=@agent-task-sync/adapter-pi
 ```
 
 ## 一次完整接续
@@ -211,10 +212,11 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 | --- | --- | --- |
 | Codex | `adapters/codex/codex-hooks.json` | `task-sync-adapter-codex session_start/pre_compact/stop` |
 | Claude Code | `adapters/claude-code/claude-hooks.json` | `task-sync-adapter-claude session_start/pre_compact/stop` |
+| Pi | `adapters/pi/pi-hooks.json` | `task-sync-adapter-pi session_start/pre_compact/stop/handoff` |
 
 会话开始读取 `status --json`，有明确任务时再读取 `context --format json`。停止或压缩前只能生成 checkpoint/handoff 候选；只有输入包含 `confirmed=true`（最终转成 CLI 的 `--yes`）时才写事件。Hook 失败会返回 warning，不应阻断 Agent 会话。
 
-Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可以按平台规则复制到命令目录。Pi 等其他 Agent 可以复用同一 CLI/JSON 合约，实现自己的薄适配器，不需要重新实现状态逻辑。
+Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可以按平台规则复制到命令目录。其他 Agent 可以复用同一 CLI/JSON 合约，实现自己的薄适配器，不需要重新实现状态逻辑。
 
 ## 环境变量
 
