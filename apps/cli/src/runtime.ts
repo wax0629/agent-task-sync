@@ -47,6 +47,8 @@ export interface RuntimeMetadata {
   mode: RuntimeMode;
   isGitRepository: boolean;
   remoteConfigured: boolean;
+  remoteUrl?: string;
+  defaultBranch?: string;
   stateBranch?: string;
   worktreePath?: string;
   stateDirectory: string;
@@ -182,6 +184,8 @@ export function createRuntime(cwd = process.cwd()) {
       mode: useGitSync ? "git-worktree" : "mock",
       isGitRepository: useGitSync,
       remoteConfigured: Boolean(discovered?.remoteUrl),
+      remoteUrl: discovered?.remoteUrl,
+      defaultBranch: discovered?.defaultBranch,
       stateBranch: useGitSync ? (sync as GitSyncPort).stateBranch : undefined,
       worktreePath: useGitSync ? (sync as GitSyncPort).worktreePath : undefined,
       stateDirectory: root

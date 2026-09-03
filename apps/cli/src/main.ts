@@ -690,8 +690,8 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
       projectId,
       name,
       rootPath: cwd,
-      remoteUrl: option(parsed.options, "remote"),
-      defaultBranch: option(parsed.options, "default-branch") ?? "main"
+      remoteUrl: option(parsed.options, "remote") ?? runtime.metadata.remoteUrl,
+      defaultBranch: option(parsed.options, "default-branch") ?? runtime.metadata.defaultBranch ?? "main"
     });
     await runtime.app.rebuild();
     if (typeof runtime.sync.initialize === "function") {
