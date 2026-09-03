@@ -12,7 +12,7 @@
     "adapters/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=@agent-task-sync/domain && npm run build --workspace=@agent-task-sync/application && npm run build --workspace=@agent-task-sync/renderer-markdown && npm run build --workspace=@agent-task-sync/store-files && npm run build --workspace=@agent-task-sync/project-registry && npm run build --workspace=@agent-task-sync/sync-git && npm run build --workspace=@agent-task-sync/cli",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
