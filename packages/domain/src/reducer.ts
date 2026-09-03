@@ -228,6 +228,7 @@ function applyEvent(state: TaskState, event: TaskEvent): void {
         filesChanged?: string[];
         commit?: string;
         verification?: TaskState["verification"];
+        uncommittedChanges?: string[];
         status?: TaskStatus;
       };
       setOptionalString(state as unknown as Record<string, unknown>, "currentFocus", checkpoint.currentFocus);
@@ -244,6 +245,9 @@ function applyEvent(state: TaskState, event: TaskEvent): void {
         });
       }
       if (checkpoint.verification) state.verification.push(...checkpoint.verification.map((item) => ({ ...item })));
+      if (checkpoint.uncommittedChanges !== undefined) {
+        state.uncommittedChanges = uniqueStrings(checkpoint.uncommittedChanges);
+      }
       break;
     }
     case "decision_recorded": {

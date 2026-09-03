@@ -45,7 +45,10 @@ test("reducer is deterministic, idempotent, and supports tasks without phases", 
     currentFocus: "Implement reducer",
     recentCompleted: ["Defined event shape"],
     nextAction: "Write store tests",
-    filesChanged: ["packages/domain/src/reducer.ts"]
+    filesChanged: ["packages/domain/src/reducer.ts"],
+    commit: "abc123",
+    uncommittedChanges: ["packages/domain/tests/reducer.test.ts"],
+    verification: [{ id: "v1", command: "npm test", result: "passed", status: "passed", checkedAt: "2026-09-03T02:00:00.000Z" }]
   }, "2026-09-03T02:00:00.000Z", ["e1"]);
   const completed = event("e3", "task_completed", { summary: "Domain reducer is ready" }, "2026-09-03T03:00:00.000Z", ["e2"]);
   const left = reduceTaskEvents([created(), checkpoint, completed]);
@@ -55,6 +58,9 @@ test("reducer is deterministic, idempotent, and supports tasks without phases", 
   assert.equal(left.state.status, "completed");
   assert.equal(left.state.phases, undefined);
   assert.deepEqual(left.state.recentCompleted, ["Defined event shape", "Domain reducer is ready"]);
+  assert.deepEqual(left.state.uncommittedChanges, ["packages/domain/tests/reducer.test.ts"]);
+  assert.equal(left.state.references[0]?.commit, "abc123");
+  assert.deepEqual(left.state.verification, [{ id: "v1", command: "npm test", result: "passed", status: "passed", checkedAt: "2026-09-03T02:00:00.000Z" }]);
   assert.equal(validateTaskState(left.state).valid, true);
 });
 

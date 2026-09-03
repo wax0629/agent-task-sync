@@ -4,6 +4,8 @@ import { basename, join, resolve } from "node:path";
 import {
   ApplicationService,
   ConfirmationRequiredError,
+  HandoffAlreadyExistsError,
+  HandoffNotFoundError,
   type CheckpointInput,
   type HandoffInput,
   type ProjectStatus
@@ -492,7 +494,7 @@ function errorCode(error: unknown): number {
   if (error instanceof UninitializedError) return ExitCode.uninitialized;
   if (error instanceof GitTextConflictError) return ExitCode.conflict;
   if (error instanceof NoRemoteError || error instanceof GitSyncError) return ExitCode.gitFailure;
-  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError) return ExitCode.invalidInput;
+  if (error instanceof ConfirmationRequiredError || error instanceof CliInputError || error instanceof HandoffNotFoundError || error instanceof HandoffAlreadyExistsError) return ExitCode.invalidInput;
   if (error instanceof Error && /unsupported project protocol|protocol version/i.test(error.message)) return ExitCode.incompatible;
   return ExitCode.unexpected;
 }

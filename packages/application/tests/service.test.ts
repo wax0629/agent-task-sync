@@ -9,6 +9,7 @@ import type {
   ProjectRegistry,
   ProjectionStore,
   RenderedDocuments,
+  SyncInspection,
   SyncPort
 } from "../src/index.js";
 import type { TaskEvent, TaskState } from "@agent-task-sync/domain";
@@ -64,9 +65,11 @@ class FakeRenderer implements MarkdownRenderer {
 class FakeSync implements SyncPort {
   calls: string[] = [];
 
+  constructor(private readonly inspection: SyncInspection = { localEventCount: 0, localAhead: false, remoteAhead: false, conflict: false }) {}
+
   async inspect() {
     this.calls.push("inspect");
-    return { localEventCount: 0, localAhead: false, remoteAhead: false, conflict: false };
+    return { ...this.inspection };
   }
 
   async pull() {
@@ -80,11 +83,11 @@ class FakeSync implements SyncPort {
   }
 }
 
-function service() {
+function service(inspection?: SyncInspection) {
   const events = new MemoryEvents();
   const projections = new MemoryProjections();
   const registry = new MemoryRegistry();
-  const sync = new FakeSync();
+  const sync = new FakeSync(inspection);
   const app = new ApplicationService({
     events,
     projections,
@@ -113,7 +116,7 @@ test("init, createTask, status, and context use application ports", async () => 
   assert.equal(status.tasks[0]?.id, "task-1");
   const context = await app.getContext("task-1");
   assert.match(context.markdown, /Demo task/);
-  assert.deepEqual(sync.calls, ["inspect", "inspect"]);
+  assert.deepEqual(sync.calls, ["inspect", "inspect", "inspect"]);
 });
 
 test("writes require explicit confirmation and checkpoint uses current event heads", async () => {
@@ -135,4 +138,33 @@ test("sync always goes through SyncPort and rebuilds before push", async () => {
   const result = await app.sync();
   assert.equal(result.push.changed, true);
   assert.deepEqual(sync.calls.slice(-3), ["inspect", "pull", "push"]);
+});
+
+test("handoff validates the current id and makes repeated acceptance idempotent", async () => {
+  const { app, events } = service();
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ projectId: "project-1", taskId: "task-1", title: "Demo task", goal: "Goal" }, actor);
+  await assert.rejects(
+    app.acceptHandoff({ taskId: "task-1", handoffId: "missing", confirmed: true }, actor),
+    /does not exist/
+  );
+  const created = await app.createHandoff({ taskId: "task-1", handoffId: "handoff-1", completedWork: ["Done"], confirmed: true }, actor);
+  const accepted = await app.acceptHandoff({ taskId: "task-1", handoffId: "handoff-1", confirmed: true }, actor);
+  const repeated = await app.acceptHandoff({ taskId: "task-1", handoffId: "handoff-1", confirmed: true }, { ...actor, agentId: "claude-code" });
+  assert.equal(created.handoff?.id, "handoff-1");
+  assert.equal(accepted.handoff?.acceptedAt, repeated.handoff?.acceptedAt);
+  assert.equal(events.values.filter((event) => event.type === "handoff_accepted").length, 1);
+});
+
+test("status and context project sync inspection into task summaries and warnings", async () => {
+  const { app } = service({ localEventCount: 5, remoteEventCount: 3, localAhead: true, remoteAhead: true, conflict: true });
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ projectId: "project-1", taskId: "task-1", title: "Demo task", goal: "Goal" }, actor);
+  const status = await app.status();
+  assert.equal(status.tasks[0]?.sync.unsyncedEventCount, 2);
+  assert.equal(status.tasks[0]?.sync.remoteAhead, true);
+  const context = await app.getContext("task-1");
+  assert.match(context.warning ?? "", /远程有更新/);
+  assert.match(context.warning ?? "", /尚未同步/);
+  assert.match(context.warning ?? "", /冲突/);
 });

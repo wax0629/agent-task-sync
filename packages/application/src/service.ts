@@ -27,6 +27,7 @@ import type {
   ProjectionStore,
   RebuildResult,
   RenderedDocuments,
+  SyncInspection,
   SyncPort,
   SyncResult,
   TaskSyncService
@@ -49,6 +50,20 @@ export class ConfirmationRequiredError extends Error {
   }
 }
 
+export class HandoffNotFoundError extends Error {
+  constructor(taskId: string, handoffId: string) {
+    super(`Handoff ${handoffId} does not exist for task ${taskId}.`);
+    this.name = "HandoffNotFoundError";
+  }
+}
+
+export class HandoffAlreadyExistsError extends Error {
+  constructor(taskId: string, handoffId: string) {
+    super(`Handoff ${handoffId} already exists for task ${taskId}.`);
+    this.name = "HandoffAlreadyExistsError";
+  }
+}
+
 export class ApplicationService implements TaskSyncService {
   private readonly now: () => string;
   private readonly eventId: () => string;
@@ -65,8 +80,8 @@ export class ApplicationService implements TaskSyncService {
   async status(): Promise<ProjectStatus> {
     const project = await this.dependencies.registry.current();
     const events = await this.dependencies.events.readProjectEvents(project?.projectId);
-    const tasks = this.reduceTasks(events);
     const sync = await this.dependencies.sync.inspect();
+    const tasks = this.reduceTasks(events).map((state) => this.withSyncSummary(state, sync));
     return { project, tasks, sync };
   }
 
@@ -123,6 +138,15 @@ export class ApplicationService implements TaskSyncService {
     this.requireConfirmation(input.confirmed ?? actor.confirmed);
     const events = await this.dependencies.events.readTaskEvents(input.taskId);
     const current = this.reduceOne(events);
+    const existingHandoffIds = events
+      .filter((event) => event.type === "handoff_created")
+      .map((event) => {
+        const payload = event.payload as HandoffCreatedPayload;
+        return payload.handoffId ?? `handoff-${event.eventId}`;
+      });
+    if (input.handoffId && existingHandoffIds.includes(input.handoffId)) {
+      throw new HandoffAlreadyExistsError(input.taskId, input.handoffId);
+    }
     const payload: HandoffCreatedPayload = {
       handoffId: input.handoffId,
       completedWork: input.completedWork,
@@ -142,24 +166,33 @@ export class ApplicationService implements TaskSyncService {
     this.requireConfirmation(input.confirmed ?? actor.confirmed);
     const events = await this.dependencies.events.readTaskEvents(input.taskId);
     const current = this.reduceOne(events);
+    if (!current.handoff || current.handoff.id !== input.handoffId) {
+      throw new HandoffNotFoundError(input.taskId, input.handoffId);
+    }
+    // Accepting the same handoff twice is a safe retry, not a second state transition.
+    if (current.handoff.acceptedAt) return this.rebuildOne(input.taskId);
     const payload: HandoffAcceptedPayload = { handoffId: input.handoffId };
     await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "handoff_accepted", payload, actor, this.heads(events)));
     return this.rebuildOne(input.taskId);
   }
 
   async rebuild(taskId?: string): Promise<RebuildResult> {
-    if (taskId) return { taskIds: [taskId], states: [await this.rebuildOne(taskId)] };
+    return this.rebuildInternal(taskId);
+  }
+
+  private async rebuildInternal(taskId?: string, inspection?: SyncInspection): Promise<RebuildResult> {
+    if (taskId) return { taskIds: [taskId], states: [await this.rebuildOne(taskId, inspection)] };
     const project = await this.dependencies.registry.current();
     const events = await this.dependencies.events.readProjectEvents(project?.projectId);
     const taskIds = [...new Set(events.map((event) => event.taskId))].sort();
-    const states = await Promise.all(taskIds.map((id) => this.rebuildOne(id)));
+    const states = await Promise.all(taskIds.map((id) => this.rebuildOne(id, inspection)));
     return { taskIds, states };
   }
 
   async sync(): Promise<SyncResult> {
     const inspection = await this.dependencies.sync.inspect();
     const pull = await this.dependencies.sync.pull();
-    const rebuilt = await this.rebuild();
+    const rebuilt = await this.rebuildInternal(undefined, inspection);
     const push = await this.dependencies.sync.push();
     return { inspection, pull, push, rebuilt };
   }
@@ -167,19 +200,26 @@ export class ApplicationService implements TaskSyncService {
   async getContext(taskId: string): Promise<ContinuationContext> {
     const events = await this.dependencies.events.readTaskEvents(taskId);
     const task = this.reduceOne(events);
-    const documents = this.dependencies.renderer.render(task, events);
     const sync = await this.dependencies.sync.inspect();
+    this.withSyncSummary(task, sync);
+    const rendered = this.dependencies.renderer.render(task, events);
+    const warnings = [
+      sync.remoteAhead ? "远程有更新，请先运行 task-sync sync。" : undefined,
+      sync.localAhead && task.sync.unsyncedEventCount > 0 ? `本地有 ${task.sync.unsyncedEventCount} 条事件尚未同步。` : undefined,
+      sync.conflict || task.conflicts.some((conflict) => !conflict.resolved) ? "同步存在冲突，请先审阅后再继续。" : undefined
+    ].filter((value): value is string => Boolean(value));
     return {
       task,
-      markdown: documents.taskPlan,
+      markdown: rendered.taskPlan,
       source: "events",
-      warning: sync.remoteAhead ? "Remote state is ahead; run task-sync sync before writing." : undefined
+      warning: warnings.length ? warnings.join("\n") : undefined
     };
   }
 
-  private async rebuildOne(taskId: string): Promise<TaskState> {
+  private async rebuildOne(taskId: string, inspection?: SyncInspection): Promise<TaskState> {
     const events = await this.dependencies.events.readTaskEvents(taskId);
     const state = this.reduceOne(events);
+    this.withSyncSummary(state, inspection ?? await this.dependencies.sync.inspect());
     const documents = this.dependencies.renderer.render(state, events);
     await this.dependencies.projections.writeTaskState(state);
     await this.dependencies.projections.writeMarkdown(taskId, documents);
@@ -194,6 +234,23 @@ export class ApplicationService implements TaskSyncService {
   private reduceOne(events: readonly TaskEvent[]): TaskState {
     if (events.length === 0) throw new Error("Task has no events.");
     return reduceTaskEvents(events).state;
+  }
+
+  private withSyncSummary(state: TaskState, inspection: SyncInspection): TaskState {
+    const remoteEventCount = inspection.remoteEventCount;
+    const unsyncedEventCount = inspection.localAhead
+      ? remoteEventCount === undefined
+        ? Math.max(0, inspection.localEventCount)
+        : Math.max(0, inspection.localEventCount - remoteEventCount)
+      : 0;
+    state.sync = {
+      unsyncedEventCount,
+      localAhead: inspection.localAhead,
+      remoteAhead: inspection.remoteAhead,
+      conflict: inspection.conflict,
+      ...(inspection.lastSyncedAt ? { lastSyncedAt: inspection.lastSyncedAt } : {})
+    };
+    return state;
   }
 
   private makeEvent<TPayload extends EventPayload>(

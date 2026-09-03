@@ -22,8 +22,21 @@
     "knownErrors": { "type": "array", "items": { "type": "object" } },
     "references": { "type": "array", "items": { "type": "object" } },
     "verification": { "type": "array", "items": { "type": "object" } },
+    "uncommittedChanges": { "type": "array", "items": { "type": "string" } },
     "ownership": { "type": "object" },
-    "sync": { "type": "object" },
+    "sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unsyncedEventCount"],
+      "properties": {
+        "unsyncedEventCount": { "type": "integer", "minimum": 0 },
+        "localAhead": { "type": "boolean" },
+        "remoteAhead": { "type": "boolean" },
+        "conflict": { "type": "boolean" },
+        "lastSyncedAt": { "type": "string", "format": "date-time" },
+        "remoteRevision": { "type": "string", "minLength": 1 }
+      }
+    },
     "handoff": { "type": "object" },
     "conflicts": { "type": "array", "items": { "type": "object" } },
     "revision": { "type": "string", "minLength": 1 },

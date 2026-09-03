@@ -67,6 +67,53 @@ test("fixture rebuild preserves CRLF compatibility and renders complete continua
   assert.equal((await readFile(join(root, "tasks", "fixture-task", "task_plan.md"), "utf8")).includes("\r"), false);
 });
 
+test("complete checkpoint and handoff fixture rebuilds all four projections without losing fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-task-sync-contract-checkpoint-handoff-"));
+  await copyFixture("checkpoint-handoff.jsonl", root, "checkpoint-handoff-task");
+  const runtime = fileRuntime(root);
+  await runtime.registry.init({ projectId: "fixture-project", name: "Fixture project", rootPath: root });
+
+  const first = await runtime.app.rebuild("checkpoint-handoff-task");
+  const firstState = first.states[0];
+  assert.ok(firstState);
+  assert.deepEqual(firstState?.uncommittedChanges, ["tests/contract.test.ts"]);
+  assert.equal(firstState?.currentFocus, "Verify projection parity");
+  assert.equal(firstState?.nextAction, "Accept the handoff");
+  assert.deepEqual(firstState?.recentCompleted, ["Defined the event contract"]);
+  assert.equal(firstState?.references[0]?.commit, "abc1234");
+  assert.equal(firstState?.verification[0]?.status, "passed");
+  assert.equal(firstState?.handoff?.id, "handoff-fixture-1");
+  assert.equal(firstState?.handoff?.acceptedBy?.deviceId, "windows");
+
+  const filesBefore = await Promise.all([
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "task.yaml"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "task_plan.md"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "progress.md"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "handoff.md"), "utf8")
+  ]);
+  assert.match(filesBefore[0], /uncommittedChanges/);
+  assert.match(filesBefore[0], /handoff-fixture-1/);
+  assert.match(filesBefore[1], /交接 ID：handoff-fixture-1/);
+  assert.match(filesBefore[1], /未提交变更：/);
+  assert.match(filesBefore[2], /创建交接 handoff-fixture-1/);
+  assert.match(filesBefore[2], /接受交接 handoff-fixture-1/);
+  assert.match(filesBefore[3], /Events remain the source of truth/);
+  assert.match(filesBefore[3], /接受时间：2026-09-03T04:00:00.000Z/);
+
+  const eventsBefore = await runtime.events.readTaskEvents("checkpoint-handoff-task");
+  const second = await runtime.app.rebuild("checkpoint-handoff-task");
+  const filesAfter = await Promise.all([
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "task.yaml"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "task_plan.md"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "progress.md"), "utf8"),
+    readFile(join(root, "tasks", "checkpoint-handoff-task", "handoff.md"), "utf8")
+  ]);
+  const eventsAfter = await runtime.events.readTaskEvents("checkpoint-handoff-task");
+  assert.deepEqual(eventsAfter.map((event) => event.eventId), eventsBefore.map((event) => event.eventId));
+  assert.equal(second.states[0]?.revision, firstState?.revision);
+  assert.deepEqual(filesAfter, filesBefore);
+});
+
 test("application writes checkpoint and handoff events only after confirmation and rebuilds projections", async () => {
   const root = await mkdtemp(join(tmpdir(), "agent-task-sync-contract-write-"));
   const runtime = fileRuntime(root);

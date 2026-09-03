@@ -91,6 +91,9 @@ export interface VerificationResult {
 
 export interface SyncSummary {
   unsyncedEventCount: number;
+  localAhead?: boolean;
+  remoteAhead?: boolean;
+  conflict?: boolean;
   lastSyncedAt?: string;
   remoteRevision?: string;
 }
@@ -151,6 +154,7 @@ export interface TaskState {
   knownErrors: KnownError[];
   references: WorkReference[];
   verification: VerificationResult[];
+  uncommittedChanges?: string[];
   ownership?: Ownership;
   sync: SyncSummary;
   handoff?: HandoffState;
