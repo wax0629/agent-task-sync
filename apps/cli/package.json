@@ -1,0 +1,22 @@
+{
+  "name": "@agent-task-sync/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "task-sync": "dist/main.js"
+  },
+  "dependencies": {
+    "@agent-task-sync/application": "0.1.0",
+    "@agent-task-sync/domain": "0.1.0",
+    "@agent-task-sync/project-registry": "0.1.0",
+    "@agent-task-sync/renderer-markdown": "0.1.0",
+    "@agent-task-sync/store-files": "0.1.0",
+    "@agent-task-sync/sync-git": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  }
+}
