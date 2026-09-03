@@ -102,4 +102,3 @@ test("compiled Codex, Claude Code, and Pi hooks keep every dispatch non-blocking
     assert.equal((unknown.invocations as unknown[]).length, 0);
   }
 });
-
