@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createClaudeCodeAdapter } from "./index.js";
 import { runHook } from "@agent-task-sync/adapter-contract";
 
