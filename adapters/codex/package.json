@@ -1,0 +1,24 @@
+{
+  "name": "@agent-task-sync/adapter-codex",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "task-sync-adapter-codex": "dist/hook.js"
+  },
+  "dependencies": {
+    "@agent-task-sync/adapter-contract": "0.1.0",
+    "@agent-task-sync/cli": "0.1.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
