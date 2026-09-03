@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FileEventStore, FileProjectionStore } from "../src/index.js";
+import { assertValidTaskState } from "@agent-task-sync/domain";
 import type { TaskEvent, TaskState } from "@agent-task-sync/domain";
 
 function makeEvent(eventId: string, sessionId = "session-1"): TaskEvent {
@@ -64,6 +65,42 @@ test("projection files are stable and validate task state", async () => {
   assert.equal(first, "# Demo\n");
   assert.equal(second, first);
   assert.equal((await store.readTaskState("task-1"))?.title, "Demo");
+});
+
+test("accepted handoff state round-trips through YAML without an alias error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-task-sync-handoff-projection-"));
+  const store = new FileProjectionStore(root);
+  const acceptedBy = { agentId: "claude-code", deviceId: "windows", sessionId: "session-2", claimedAt: "2026-09-03T02:01:00.000Z" };
+  const state: TaskState = {
+    ...makeState(),
+    status: "in_progress",
+    currentFocus: "Resume on Windows",
+    nextAction: "Run the integration suite",
+    recentCompleted: ["Create the handoff"],
+    references: [{ path: "apps/cli/src/main.ts", note: "Checkpoint", recordedAt: "2026-09-03T02:00:00.000Z" }],
+    verification: [{ id: "verification-1", command: "npm test", result: "passed", status: "passed", checkedAt: "2026-09-03T02:00:00.000Z" }],
+    uncommittedChanges: ["apps/cli/src/main.ts"],
+    ownership: { ...acceptedBy },
+    handoff: {
+      id: "handoff-1",
+      completedWork: ["Create the handoff"],
+      incompleteWork: ["Accept the handoff"],
+      keyDecisions: [],
+      knownErrors: [],
+      nextStep: "Run the integration suite",
+      relevantFiles: ["apps/cli/src/main.ts"],
+      targetAgent: "claude-code",
+      createdAt: "2026-09-03T02:00:00.000Z",
+      acceptedAt: "2026-09-03T02:01:00.000Z",
+      acceptedBy
+    }
+  };
+
+  assertValidTaskState(state);
+  await store.writeTaskState(state);
+  const restored = await store.readTaskState("task-1");
+  assert.deepEqual(restored?.ownership, restored?.handoff?.acceptedBy);
+  assert.match(await readFile(join(root, "tasks", "task-1", "task.yaml"), "utf8"), /ownership:/);
 });
 
 test("invalid JSONL reports the exact file and line", async () => {

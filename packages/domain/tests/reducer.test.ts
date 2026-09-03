@@ -90,3 +90,17 @@ test("conflict_resolved references both competing events and restores the chosen
   assert.equal(state.conflicts[0]?.resolved, true);
   assert.deepEqual(state.conflicts[0]?.resolution?.resolvedEventIds, ["e2", "e3"]);
 });
+
+test("accepted handoff keeps ownership and acceptedBy as independent values", () => {
+  const handoff = event("e2", "handoff_created", {
+    handoffId: "handoff-1",
+    completedWork: ["Create the handoff"],
+    incompleteWork: ["Accept the handoff"],
+    nextStep: "Continue on another device"
+  }, "2026-09-03T02:00:00.000Z", ["e1"]);
+  const accepted = event("e3", "handoff_accepted", { handoffId: "handoff-1" }, "2026-09-03T02:01:00.000Z", ["e2"]);
+  const state = reduceTaskEvents([created(), handoff, accepted]).state;
+
+  assert.deepEqual(state.ownership, state.handoff?.acceptedBy);
+  assert.notEqual(state.ownership, state.handoff?.acceptedBy);
+});
