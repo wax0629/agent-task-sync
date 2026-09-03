@@ -407,6 +407,7 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     if (parsed.args.length > 2) throw new CliInputError("usage: task-sync init [project-id] [project-name]");
     const projectId = required(parsed.args[0] ?? option(parsed.options, "project") ?? basename(cwd), "项目 ID");
     const name = parsed.args[1] ?? option(parsed.options, "name") ?? projectId;
+    if (typeof runtime.sync.initialize === "function") await runtime.sync.initialize();
     const project = await runtime.app.init({
       projectId,
       name,
@@ -414,6 +415,13 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
       remoteUrl: option(parsed.options, "remote"),
       defaultBranch: option(parsed.options, "default-branch") ?? "main"
     });
+    if (typeof runtime.sync.initialize === "function") {
+      try {
+        await runtime.sync.push();
+      } catch (error) {
+        if (!(error instanceof NoRemoteError)) throw error;
+      }
+    }
     print(project, parsed.json, `已初始化项目：${project.name}`);
     return ExitCode.ok;
   }

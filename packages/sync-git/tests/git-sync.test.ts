@@ -67,6 +67,23 @@ test("initialize creates a dedicated state branch worktree without touching code
   assert.equal(runner.calls.some(({ args }) => args[0] === "worktree"), false);
 });
 
+test("initialize replaces an empty target directory but rejects a non-empty non-worktree", async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), "agent-task-sync-git-empty-target-"));
+  const worktreePath = join(repoRoot, "state-worktree");
+  await mkdir(worktreePath);
+  const runner = new ScriptedRunner(baseScript);
+  const port = new FileGitSyncPort({ repoRoot, worktreePath, runner });
+  await port.initialize();
+  assert.equal(runner.calls.some(({ args }) => args[0] === "worktree" && args[1] === "add"), true);
+
+  const occupiedRoot = await mkdtemp(join(tmpdir(), "agent-task-sync-git-occupied-target-"));
+  const occupiedPath = join(occupiedRoot, "state-worktree");
+  await mkdir(occupiedPath);
+  await writeFile(join(occupiedPath, "unexpected.txt"), "content", "utf8");
+  const occupiedPort = new FileGitSyncPort({ repoRoot: occupiedRoot, worktreePath: occupiedPath, runner: new ScriptedRunner(baseScript) });
+  await assert.rejects(occupiedPort.initialize(), /not a Git worktree/);
+});
+
 test("pull without a remote keeps local events and does not fail", async () => {
   const fixture = await worktreeFixture();
   const runner = new ScriptedRunner((args) => {
