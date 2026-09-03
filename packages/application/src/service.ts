@@ -30,6 +30,7 @@ import type {
   ErrorInput,
   EventStore,
   HandoffInput,
+  HandoffCheck,
   InitProjectInput,
   MarkdownRenderer,
   ProjectInfo,
@@ -404,6 +405,42 @@ export class ApplicationService implements TaskSyncService {
     const payload: HandoffAcceptedPayload = { handoffId: input.handoffId };
     await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "handoff_accepted", payload, actor, this.heads(events)));
     return this.rebuildOne(input.taskId);
+  }
+
+  async checkHandoff(taskId: string): Promise<HandoffCheck> {
+    const events = await this.dependencies.events.readTaskEvents(taskId);
+    const task = this.reduceOne(events);
+    const blockers: string[] = [];
+    const recommendations: string[] = [];
+    const unresolvedConflicts = task.conflicts.filter((conflict) => !conflict.resolved).length;
+
+    if (unresolvedConflicts > 0) {
+      blockers.push(`存在 ${unresolvedConflicts} 个未解决冲突，请先审阅。`);
+    }
+    if (task.status === "completed" || task.status === "archived") {
+      blockers.push(`任务当前状态为 ${task.status}，不建议再创建 handoff。`);
+    }
+    if (!task.currentFocus) recommendations.push("补充当前关注点，方便下一位 Agent 定位工作。");
+    if (!task.nextAction) recommendations.push("补充一个主要下一步；没有明确动作时可以暂不填写。");
+    if (task.verification.length === 0) recommendations.push("记录最近一次验证结果，说明交接内容是否可复现。");
+    if (task.uncommittedChanges === undefined) recommendations.push("确认是否存在未提交变更，并在 handoff 中说明。");
+    if (!task.ownership) recommendations.push("确认最后更新的 Agent、设备和会话。");
+    const unresolvedQuestions = task.openQuestions.filter((question) => !question.resolved).length;
+    if (unresolvedQuestions > 0) recommendations.push(`标记或转交 ${unresolvedQuestions} 个待确认问题。`);
+    const unresolvedErrors = task.knownErrors.filter((error) => !error.resolved).length;
+    if (unresolvedErrors > 0) recommendations.push(`说明 ${unresolvedErrors} 个未解决错误的已尝试处理方式。`);
+    if (!task.handoff) recommendations.push("当前尚未创建 handoff；确认摘要后再执行 handoff create。");
+    else if (!task.handoff.nextStep) recommendations.push("在当前 handoff 中补充下一步。");
+
+    return {
+      taskId: task.id,
+      taskTitle: task.title,
+      taskStatus: task.status,
+      hasHandoff: Boolean(task.handoff),
+      ready: blockers.length === 0,
+      blockers,
+      recommendations
+    };
   }
 
   async rebuild(taskId?: string): Promise<RebuildResult> {

@@ -299,6 +299,46 @@ test("handoff validates the current id and makes repeated acceptance idempotent"
   assert.equal(events.values.filter((event) => event.type === "handoff_accepted").length, 1);
 });
 
+test("handoff check separates blockers from optional recovery recommendations", async () => {
+  const { app, events } = service();
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ taskId: "task-1", projectId: "project-1", title: "Check handoff", goal: "Explain recovery readiness" }, actor);
+
+  const initial = await app.checkHandoff("task-1");
+  assert.equal(initial.ready, true);
+  assert.equal(initial.hasHandoff, false);
+  assert.equal(initial.blockers.length, 0);
+  assert.ok(initial.recommendations.some((item) => item.includes("下一步")));
+  const eventCount = events.values.length;
+
+  await app.recordCheckpoint({
+    taskId: "task-1",
+    currentFocus: "Validate handoff",
+    nextAction: "Continue on Windows",
+    verification: [{ id: "verification-1", command: "npm test", result: "passed", status: "passed", checkedAt: "2026-09-03T03:00:00.000Z" }],
+    uncommittedChanges: [],
+    confirmed: true
+  }, actor);
+  await app.claimTask({ taskId: "task-1", confirmed: true }, actor);
+  const ready = await app.checkHandoff("task-1");
+  assert.equal(ready.ready, true);
+  assert.equal(ready.blockers.length, 0);
+  assert.equal(ready.recommendations.length, 1);
+  assert.match(ready.recommendations[0] ?? "", /尚未创建 handoff/);
+
+  await app.createHandoff({ taskId: "task-1", nextStep: "Continue on Windows", testSummary: "npm test passed", confirmed: true }, actor);
+  const withHandoff = await app.checkHandoff("task-1");
+  assert.equal(withHandoff.hasHandoff, true);
+  assert.equal(withHandoff.ready, true);
+  assert.equal(withHandoff.recommendations.length, 0);
+
+  await app.completeTask({ taskId: "task-1", summary: "Done", confirmed: true }, actor);
+  const completed = await app.checkHandoff("task-1");
+  assert.equal(completed.ready, false);
+  assert.ok(completed.blockers.some((item) => item.includes("completed")));
+  assert.equal(events.values.length, eventCount + 4);
+});
+
 test("status and context project sync inspection into task summaries and warnings", async () => {
   const { app } = service({ localEventCount: 5, remoteEventCount: 3, localAhead: true, remoteAhead: true, conflict: true });
   await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
