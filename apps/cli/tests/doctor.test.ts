@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import test from "node:test";
 import { mkdtemp } from "node:fs/promises";
@@ -18,6 +18,10 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function git(cwd: string, ...args: string[]): void {
+  execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 test("doctor reports an uninitialized mock runtime without creating state", async () => {
@@ -93,5 +97,106 @@ test("doctor detects a Git repository without initializing its state worktree", 
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
     if (previousWorktreePath === undefined) delete process.env.TASK_SYNC_WORKTREE_PATH;
     else process.env.TASK_SYNC_WORKTREE_PATH = previousWorktreePath;
+  }
+});
+
+test("init persists discovered Git remote and default branch in project metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-task-sync-doctor-remote-"));
+  const repo = join(root, "repo");
+  const remote = join(root, "remote.git");
+  const worktreePath = join(root, "state-worktree");
+  const previous = {
+    stateDir: process.env.TASK_SYNC_STATE_DIR,
+    worktreePath: process.env.TASK_SYNC_WORKTREE_PATH,
+    remoteName: process.env.TASK_SYNC_REMOTE_NAME,
+    defaultBranch: process.env.TASK_SYNC_DEFAULT_BRANCH
+  };
+  delete process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_WORKTREE_PATH = worktreePath;
+  delete process.env.TASK_SYNC_REMOTE_NAME;
+  delete process.env.TASK_SYNC_DEFAULT_BRANCH;
+  try {
+    git(root, "init", "--bare", "-q", remote);
+    git(root, "init", "-q", "-b", "main", repo);
+    git(repo, "config", "user.email", "doctor@example.com");
+    git(repo, "config", "user.name", "Agent Task Sync Doctor");
+    await writeFile(join(repo, "README.md"), "fixture\n", "utf8");
+    git(repo, "add", "README.md");
+    git(repo, "commit", "-q", "-m", "fixture");
+    git(repo, "remote", "add", "origin", remote);
+    const runtime = createRuntime(repo);
+    await runtime.sync.initialize?.();
+    const initCode = await run(["init", "project-1", "Remote project"], repo);
+    assert.equal(initCode, ExitCode.ok);
+
+    const manifest = await runtime.registry.current();
+    assert.equal(manifest?.remoteUrl, remote);
+    assert.equal(manifest?.defaultBranch, "main");
+
+    const report = await inspectRuntime(createRuntime(repo));
+    assert.equal(report.project?.remoteConfigured, true);
+    assert.equal(report.checks.find((check) => check.id === "remote")?.status, "passed");
+  } finally {
+    if (previous.stateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previous.stateDir;
+    if (previous.worktreePath === undefined) delete process.env.TASK_SYNC_WORKTREE_PATH;
+    else process.env.TASK_SYNC_WORKTREE_PATH = previous.worktreePath;
+    if (previous.remoteName === undefined) delete process.env.TASK_SYNC_REMOTE_NAME;
+    else process.env.TASK_SYNC_REMOTE_NAME = previous.remoteName;
+    if (previous.defaultBranch === undefined) delete process.env.TASK_SYNC_DEFAULT_BRANCH;
+    else process.env.TASK_SYNC_DEFAULT_BRANCH = previous.defaultBranch;
+  }
+});
+
+test("explicit init remote and default branch override discovered values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-task-sync-doctor-remote-override-"));
+  const repo = join(root, "repo");
+  const remote = join(root, "remote.git");
+  const worktreePath = join(root, "state-worktree");
+  const previous = {
+    stateDir: process.env.TASK_SYNC_STATE_DIR,
+    worktreePath: process.env.TASK_SYNC_WORKTREE_PATH,
+    remoteName: process.env.TASK_SYNC_REMOTE_NAME,
+    defaultBranch: process.env.TASK_SYNC_DEFAULT_BRANCH
+  };
+  delete process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_WORKTREE_PATH = worktreePath;
+  delete process.env.TASK_SYNC_REMOTE_NAME;
+  delete process.env.TASK_SYNC_DEFAULT_BRANCH;
+  try {
+    git(root, "init", "--bare", "-q", remote);
+    git(root, "init", "-q", "-b", "main", repo);
+    git(repo, "config", "user.email", "doctor@example.com");
+    git(repo, "config", "user.name", "Agent Task Sync Doctor");
+    await writeFile(join(repo, "README.md"), "fixture\n", "utf8");
+    git(repo, "add", "README.md");
+    git(repo, "commit", "-q", "-m", "fixture");
+    git(repo, "remote", "add", "origin", remote);
+    const explicitRemote = "https://example.com/explicit/project.git";
+    const runtime = createRuntime(repo);
+    await runtime.sync.initialize?.();
+    const initCode = await run([
+      "init",
+      "project-1",
+      "Remote override",
+      "--remote",
+      explicitRemote,
+      "--default-branch",
+      "trunk"
+    ], repo);
+    assert.equal(initCode, ExitCode.ok);
+
+    const manifest = await runtime.registry.current();
+    assert.equal(manifest?.remoteUrl, explicitRemote);
+    assert.equal(manifest?.defaultBranch, "trunk");
+  } finally {
+    if (previous.stateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previous.stateDir;
+    if (previous.worktreePath === undefined) delete process.env.TASK_SYNC_WORKTREE_PATH;
+    else process.env.TASK_SYNC_WORKTREE_PATH = previous.worktreePath;
+    if (previous.remoteName === undefined) delete process.env.TASK_SYNC_REMOTE_NAME;
+    else process.env.TASK_SYNC_REMOTE_NAME = previous.remoteName;
+    if (previous.defaultBranch === undefined) delete process.env.TASK_SYNC_DEFAULT_BRANCH;
+    else process.env.TASK_SYNC_DEFAULT_BRANCH = previous.defaultBranch;
   }
 });
