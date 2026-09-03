@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-task-sync.dev/schema/task-event.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "schemaVersion", "projectId", "taskId", "type", "payload", "parentEventIds", "writer", "createdAt"],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "const": 1 },
+    "projectId": { "type": "string", "minLength": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "type": {
+      "type": "string",
+      "enum": ["task_created", "task_updated", "task_claimed", "checkpoint_recorded", "decision_recorded", "question_recorded", "error_recorded", "verification_recorded", "handoff_created", "handoff_accepted", "task_blocked", "task_completed", "conflict_resolved"]
+    },
+    "payload": { "type": "object" },
+    "parentEventIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "writer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agentId", "deviceId", "sessionId"],
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1 },
+        "deviceId": { "type": "string", "minLength": 1 },
+        "sessionId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" }
+  }
+}
