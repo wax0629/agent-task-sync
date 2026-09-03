@@ -1,8 +1,8 @@
 # Agent Task Sync Mac 验收记录
 
-版本：v0.1  
-验收日期：2026-09-03（Asia/Shanghai）  
-验收平台：macOS（本机）  
+版本：v0.1
+验收日期：2026-09-03（Asia/Shanghai）
+验收平台：macOS（本机）
 验收结论：Mac CLI、Git 状态同步和三个 Hook 入口通过；实体 Windows、真实 Agent 生命周期和真实用户试用待补
 
 ## 1. 验收范围
@@ -73,4 +73,3 @@ npm link --workspace=@agent-task-sync/adapter-pi
 - 在真实 Codex、Claude Code、Pi 配置中触发 SessionStart、PreCompact、Stop/Handoff，并留存输出。
 - 进行一轮真实用户安装和跨设备试用，记录反馈对应的 Issue。
 - 本次验收另发现 `init` 未把自动发现的 Git remote 写入 `project.yaml`，已单独登记 Issue #65；不混入当前入口修复。
-
