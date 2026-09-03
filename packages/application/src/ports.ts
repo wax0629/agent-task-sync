@@ -124,6 +124,33 @@ export interface HandoffInput {
   confirmed?: boolean;
 }
 
+export interface UpdateTaskInput {
+  taskId: string;
+  title?: string;
+  goal?: string;
+  background?: string | null;
+  acceptanceCriteria?: TaskState["acceptanceCriteria"];
+  status?: TaskState["status"];
+  currentFocus?: string | null;
+  recentCompleted?: string[];
+  nextAction?: string | null;
+  phases?: TaskState["phases"];
+  currentPhaseId?: string | null;
+  confirmed?: boolean;
+}
+
+export interface BlockTaskInput {
+  taskId: string;
+  reason?: string;
+  confirmed?: boolean;
+}
+
+export interface CompleteTaskInput {
+  taskId: string;
+  summary?: string;
+  confirmed?: boolean;
+}
+
 export interface AcceptHandoffInput {
   taskId: string;
   handoffId: string;
@@ -159,7 +186,10 @@ export interface TaskSyncService {
   init(input: InitProjectInput): Promise<ProjectInfo>;
   status(): Promise<ProjectStatus>;
   createTask(input: CreateTaskInput, actor: Actor): Promise<TaskState>;
+  updateTask(input: UpdateTaskInput, actor: Actor): Promise<TaskState>;
   claimTask(input: ClaimTaskInput, actor: Actor): Promise<TaskState>;
+  blockTask(input: BlockTaskInput, actor: Actor): Promise<TaskState>;
+  completeTask(input: CompleteTaskInput, actor: Actor): Promise<TaskState>;
   recordCheckpoint(input: CheckpointInput, actor: Actor): Promise<TaskState>;
   createHandoff(input: HandoffInput, actor: Actor): Promise<TaskState>;
   acceptHandoff(input: AcceptHandoffInput, actor: Actor): Promise<TaskState>;

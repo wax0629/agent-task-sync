@@ -8,13 +8,18 @@ import {
   type TaskClaimedPayload,
   type TaskCreatedPayload,
   type TaskEvent,
-  type TaskState
+  type TaskState,
+  type TaskUpdatedPayload,
+  type TaskBlockedPayload,
+  type TaskCompletedPayload
 } from "@agent-task-sync/domain";
 import type {
   AcceptHandoffInput,
   Actor,
+  BlockTaskInput,
   CheckpointInput,
   ClaimTaskInput,
+  CompleteTaskInput,
   ContinuationContext,
   CreateTaskInput,
   EventStore,
@@ -30,6 +35,7 @@ import type {
   SyncInspection,
   SyncPort,
   SyncResult,
+  UpdateTaskInput,
   TaskSyncService
 } from "./ports.js";
 
@@ -61,6 +67,13 @@ export class HandoffAlreadyExistsError extends Error {
   constructor(taskId: string, handoffId: string) {
     super(`Handoff ${handoffId} already exists for task ${taskId}.`);
     this.name = "HandoffAlreadyExistsError";
+  }
+}
+
+export class EmptyTaskUpdateError extends Error {
+  constructor(taskId: string) {
+    super(`Task update for ${taskId} must include at least one field.`);
+    this.name = "EmptyTaskUpdateError";
   }
 }
 
@@ -106,6 +119,26 @@ export class ApplicationService implements TaskSyncService {
     return this.rebuildOne(input.taskId);
   }
 
+  async updateTask(input: UpdateTaskInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: TaskUpdatedPayload = {};
+    if (input.title !== undefined) payload.title = input.title;
+    if (input.goal !== undefined) payload.goal = input.goal;
+    if (input.background !== undefined) payload.background = input.background;
+    if (input.acceptanceCriteria !== undefined) payload.acceptanceCriteria = input.acceptanceCriteria;
+    if (input.status !== undefined) payload.status = input.status;
+    if (input.currentFocus !== undefined) payload.currentFocus = input.currentFocus;
+    if (input.recentCompleted !== undefined) payload.recentCompleted = input.recentCompleted;
+    if (input.nextAction !== undefined) payload.nextAction = input.nextAction;
+    if (input.phases !== undefined) payload.phases = input.phases;
+    if (input.currentPhaseId !== undefined) payload.currentPhaseId = input.currentPhaseId;
+    if (Object.keys(payload).length === 0) throw new EmptyTaskUpdateError(input.taskId);
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_updated", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
   async claimTask(input: ClaimTaskInput, actor: Actor): Promise<TaskState> {
     this.requireConfirmation(input.confirmed ?? actor.confirmed);
     const events = await this.dependencies.events.readTaskEvents(input.taskId);
@@ -118,6 +151,24 @@ export class ApplicationService implements TaskSyncService {
       released: input.released
     };
     await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_claimed", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async blockTask(input: BlockTaskInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: TaskBlockedPayload = { reason: input.reason };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_blocked", payload, actor, this.heads(events)));
+    return this.rebuildOne(input.taskId);
+  }
+
+  async completeTask(input: CompleteTaskInput, actor: Actor): Promise<TaskState> {
+    this.requireConfirmation(input.confirmed ?? actor.confirmed);
+    const events = await this.dependencies.events.readTaskEvents(input.taskId);
+    const current = this.reduceOne(events);
+    const payload: TaskCompletedPayload = { summary: input.summary };
+    await this.dependencies.events.append(this.makeEvent(current.projectId, input.taskId, "task_completed", payload, actor, this.heads(events)));
     return this.rebuildOne(input.taskId);
   }
 

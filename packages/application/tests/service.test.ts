@@ -131,6 +131,45 @@ test("writes require explicit confirmation and checkpoint uses current event hea
   assert.deepEqual(events.values[1]?.parentEventIds, ["event-1"]);
 });
 
+test("task lifecycle updates append events and rebuild every projection", async () => {
+  const { app, events, projections } = service();
+  await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });
+  await app.createTask({ taskId: "task-1", projectId: "project-1", title: "Original", goal: "Keep context", background: "Initial context", confirmed: true }, actor);
+  await assert.rejects(
+    app.updateTask({ taskId: "task-1", title: "Should not write", confirmed: false }, actor),
+    ConfirmationRequiredError
+  );
+
+  const updated = await app.updateTask({
+    taskId: "task-1",
+    title: "Updated task",
+    background: null,
+    currentFocus: "Lifecycle API",
+    nextAction: null,
+    recentCompleted: ["Defined the lifecycle contract"],
+    status: "in_progress",
+    confirmed: true
+  }, actor);
+  assert.equal(updated.title, "Updated task");
+  assert.equal(updated.background, undefined);
+  assert.equal(updated.currentFocus, "Lifecycle API");
+  assert.equal(updated.nextAction, undefined);
+  assert.equal(updated.status, "in_progress");
+  assert.deepEqual(updated.recentCompleted, ["Defined the lifecycle contract"]);
+  assert.equal(events.values[1]?.type, "task_updated");
+
+  const blocked = await app.blockTask({ taskId: "task-1", reason: "Waiting for a product decision", confirmed: true }, actor);
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.knownErrors[0]?.error, "Waiting for a product decision");
+  assert.equal(events.values[2]?.type, "task_blocked");
+
+  const completed = await app.completeTask({ taskId: "task-1", summary: "Decision received and implementation complete", confirmed: true }, actor);
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.recentCompleted.includes("Decision received and implementation complete"), true);
+  assert.equal(events.values[3]?.type, "task_completed");
+  assert.match(projections.documents.get("task-1")?.taskPlan ?? "", /Updated task/);
+});
+
 test("sync always goes through SyncPort and rebuilds before push", async () => {
   const { app, sync } = service();
   await app.init({ projectId: "project-1", name: "Demo", rootPath: "/repo" });

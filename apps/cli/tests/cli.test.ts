@@ -88,3 +88,35 @@ test("CLI writes the complete task lifecycle and supports JSON output", async ()
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
   }
 });
+
+test("CLI updates, blocks, and completes a task through append-only events", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-task-operations-"));
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Operations"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "create", "task-1", "Original task", "--goal", "Keep context", "--background", "Initial", "--yes", "--json"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "update", "task-1", "--title", "Updated task", "--clear-background", "--current-focus", "Lifecycle API", "--next-action", "Ship it", "--status", "in_progress", "--yes", "--json"], cwd), ExitCode.ok);
+    let state = (await createRuntime(cwd).app.status()).tasks[0];
+    assert.equal(state?.title, "Updated task");
+    assert.equal(state?.background, undefined);
+    assert.equal(state?.currentFocus, "Lifecycle API");
+    assert.equal(state?.nextAction, "Ship it");
+    assert.equal(state?.status, "in_progress");
+
+    assert.equal(await run(["task", "block", "task-1", "--reason", "Waiting for review"], cwd), ExitCode.invalidInput);
+    assert.equal((await createRuntime(cwd).app.status()).tasks[0]?.status, "in_progress");
+    assert.equal(await run(["task", "block", "task-1", "--reason", "Waiting for review", "--yes", "--json"], cwd), ExitCode.ok);
+    state = (await createRuntime(cwd).app.status()).tasks[0];
+    assert.equal(state?.status, "blocked");
+    assert.equal(state?.knownErrors.at(-1)?.error, "Waiting for review");
+
+    assert.equal(await run(["task", "complete", "task-1", "--summary", "Review complete", "--yes", "--json"], cwd), ExitCode.ok);
+    state = (await createRuntime(cwd).app.status()).tasks[0];
+    assert.equal(state?.status, "completed");
+    assert.equal(state?.recentCompleted.at(-1), "Review complete");
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
