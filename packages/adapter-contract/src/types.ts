@@ -1,6 +1,7 @@
-export type AdapterName = "codex" | "claude-code" | (string & {});
+export type AdapterName = "codex" | "claude-code" | "pi" | (string & {});
 
-export type HookName = "session_start" | "pre_compact" | "stop";
+export type HookName = "session_start" | "pre_compact" | "stop" | "handoff";
+export type HookDispatchName = HookName | "unknown";
 
 export interface CliInvocation {
   executable: string;
@@ -30,11 +31,16 @@ export interface HookInput {
 
 export interface AdapterHookResult {
   continue: true;
-  hook: HookName;
+  hook: HookDispatchName;
   output?: string;
   warning?: string;
   requiresConfirmation?: boolean;
   invocations: CliInvocation[];
+}
+
+export interface HookInputParseResult {
+  input?: HookInput;
+  warning?: string;
 }
 
 export interface AgentAdapter {

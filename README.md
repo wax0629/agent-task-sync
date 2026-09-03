@@ -227,6 +227,8 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 
 会话开始读取 `status --json`，有明确任务时再读取 `context --format json`。停止或压缩前只能生成 checkpoint/handoff 候选；只有输入包含 `confirmed=true`（最终转成 CLI 的 `--yes`）时才写事件。Hook 失败会返回 warning，不应阻断 Agent 会话。
 
+所有适配器共用同一份 Hook 输入/输出契约。stdin 可以传入 JSON 对象 `{ "cwd": string, "taskId"?: string, "checkpointInputFile"?: string, "handoffInputFile"?: string, "confirmed"?: boolean, "environment"?: object }`；非空输入必须包含非空 `cwd`，可选字段类型不正确时返回 warning。空 stdin 使用当前工作目录。未知 Hook、非法 JSON 和 CLI 失败都输出可解析的 `{ "continue": true, ... }` JSON，不抛出未处理异常，也不阻断 Agent 会话。未知或未确认的写入不会调用 CLI。
+
 Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可以按平台规则复制到命令目录。其他 Agent 可以复用同一 CLI/JSON 合约，实现自己的薄适配器，不需要重新实现状态逻辑。
 
 ## 环境变量

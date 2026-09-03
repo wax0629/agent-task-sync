@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkpointInvocation, contextInvocation, createCliAgentAdapter, handoffInvocation, statusInvocation } from "../src/index.js";
+import { checkpointInvocation, contextInvocation, createCliAgentAdapter, handoffInvocation, parseHookInput, runHook, statusInvocation } from "../src/index.js";
 import type { CliExecutor, CliInvocation, CliResult } from "../src/index.js";
 
 class FakeExecutor implements CliExecutor {
@@ -62,4 +62,50 @@ test("handoff follows the same confirmation boundary as checkpoint", async () =>
   assert.equal(accepted.continue, true);
   assert.equal(executor.calls.length, 1);
   assert.deepEqual(executor.calls[0]?.args, ["handoff", "create", "--task", "task-1", "--input", "/tmp/handoff.json", "--yes"]);
+});
+
+test("hook input parser defaults empty stdin and rejects malformed protocol fields", () => {
+  assert.deepEqual(parseHookInput("", "/repo"), { input: { cwd: "/repo" } });
+  assert.equal(parseHookInput("{", "/repo").input, undefined);
+  assert.match(parseHookInput("{", "/repo").warning ?? "", /Invalid hook input JSON/);
+  assert.match(parseHookInput("{}", "/repo").warning ?? "", /cwd/);
+  assert.match(parseHookInput('{"cwd":"/repo","confirmed":"yes"}', "/repo").warning ?? "", /confirmed/);
+  assert.match(parseHookInput('{"cwd":"/repo","environment":{"TOKEN":null}}', "/repo").warning ?? "", /environment/);
+});
+
+test("unknown hooks return stable non-blocking JSON without invoking the CLI", async () => {
+  const executor = new FakeExecutor(ok("should not run"));
+  const adapter = createCliAgentAdapter({ name: "codex", executor });
+  const result = await runHook(adapter, "future_hook", '{"cwd":"/repo"}', "/repo");
+  assert.deepEqual(result, {
+    continue: true,
+    hook: "unknown",
+    warning: "Unknown hook: future_hook.",
+    invocations: []
+  });
+  assert.equal(executor.calls.length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+});
+
+test("invalid hook input is non-blocking and preserves the requested hook name", async () => {
+  const executor = new FakeExecutor(ok("should not run"));
+  const adapter = createCliAgentAdapter({ name: "claude-code", executor });
+  const result = await runHook(adapter, "stop", '{"taskId":"task-1"}', "/repo");
+  assert.equal(result.continue, true);
+  assert.equal(result.hook, "stop");
+  assert.match(result.warning ?? "", /cwd/);
+  assert.deepEqual(result.invocations, []);
+  assert.equal(executor.calls.length, 0);
+});
+
+test("handoff dispatch keeps its own hook name and confirmation boundary", async () => {
+  const executor = new FakeExecutor(ok("written"));
+  const adapter = createCliAgentAdapter({ name: "pi", executor });
+  const candidate = await runHook(adapter, "handoff", '{"cwd":"/repo","taskId":"task-1","handoffInputFile":"/tmp/handoff.json"}', "/repo");
+  assert.equal(candidate.hook, "handoff");
+  assert.equal(candidate.requiresConfirmation, true);
+  assert.equal(executor.calls.length, 0);
+  const accepted = await runHook(adapter, "handoff", '{"cwd":"/repo","taskId":"task-1","handoffInputFile":"/tmp/handoff.json","confirmed":true}', "/repo");
+  assert.equal(accepted.hook, "handoff");
+  assert.equal(executor.calls.length, 1);
 });
