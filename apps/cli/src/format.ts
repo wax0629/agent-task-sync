@@ -1,6 +1,8 @@
 import type { ContinuationContext, ProjectStatus, RebuildResult, SyncResult } from "@agent-task-sync/application";
 import type { ConflictRecord, TaskState } from "@agent-task-sync/domain";
 
+export type TaskAttention = "active" | "handoff" | "blocked" | "conflict" | "unsynced";
+
 const statusLabels: Record<TaskState["status"], string> = {
   planned: "计划中",
   in_progress: "进行中",
@@ -40,6 +42,28 @@ export function formatContext(context: ContinuationContext): string {
 
 export function formatTaskList(tasks: readonly TaskState[]): string {
   return tasks.length ? tasks.map(taskLine).join("\n") : "暂无任务";
+}
+
+export function filterTasks(
+  tasks: readonly TaskState[],
+  filters: { status?: TaskState["status"]; attention?: TaskAttention } = {}
+): TaskState[] {
+  return tasks.filter((task) => {
+    if (filters.status && task.status !== filters.status) return false;
+    if (!filters.attention) return true;
+    switch (filters.attention) {
+      case "active":
+        return task.status === "in_progress";
+      case "handoff":
+        return task.status === "handoff_ready" || Boolean(task.handoff && !task.handoff.acceptedAt);
+      case "blocked":
+        return task.status === "blocked";
+      case "conflict":
+        return task.conflicts.some((conflict) => !conflict.resolved);
+      case "unsynced":
+        return task.sync.unsyncedEventCount > 0;
+    }
+  });
 }
 
 export function formatTask(task: TaskState): string {

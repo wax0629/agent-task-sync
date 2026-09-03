@@ -6,7 +6,8 @@ import test from "node:test";
 import { run } from "../src/main.js";
 import { ExitCode } from "../src/exit-codes.js";
 import { createRuntime } from "../src/runtime.js";
-import type { TaskEvent } from "@agent-task-sync/domain";
+import { filterTasks } from "../src/format.js";
+import type { TaskEvent, TaskState } from "@agent-task-sync/domain";
 import { FileEventStore } from "@agent-task-sync/store-files";
 
 test("init, status, and context expose machine-readable JSON without mixing logs", async () => {
@@ -73,6 +74,74 @@ test("CLI rebuilds a project progress projection and exposes overview counts", a
     await unlink(join(cwd, ".state", "progress.md"));
     assert.equal(await run(["rebuild", "--json"], cwd), ExitCode.ok);
     assert.match(await readFile(join(cwd, ".state", "progress.md"), "utf8"), /任务总数：4/);
+  } finally {
+    if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
+    else process.env.TASK_SYNC_STATE_DIR = previousStateDir;
+  }
+});
+
+test("task list filters by status and attention without changing the default contract", async () => {
+  const makeTask = (overrides: Partial<TaskState>): TaskState => ({
+    id: "task-default",
+    projectId: "project-1",
+    title: "Task",
+    goal: "Test filtering",
+    acceptanceCriteria: [],
+    status: "planned",
+    recentCompleted: [],
+    decisions: [],
+    openQuestions: [],
+    knownErrors: [],
+    references: [],
+    verification: [],
+    sync: { unsyncedEventCount: 0 },
+    conflicts: [],
+    revision: "revision",
+    createdAt: "2026-09-03T00:00:00.000Z",
+    updatedAt: "2026-09-03T00:00:00.000Z",
+    ...overrides
+  });
+  const tasks = [
+    makeTask({ id: "active", status: "in_progress" }),
+    makeTask({ id: "handoff", status: "handoff_ready", handoff: {
+      id: "handoff-1",
+      completedWork: [],
+      incompleteWork: [],
+      keyDecisions: [],
+      knownErrors: [],
+      relevantFiles: [],
+      createdAt: "2026-09-03T00:00:00.000Z"
+    } }),
+    makeTask({ id: "blocked", status: "blocked" }),
+    makeTask({ id: "conflict", status: "needs_review", conflicts: [{
+      id: "conflict-1",
+      taskId: "conflict",
+      field: "nextAction",
+      parentEventIds: [],
+      eventIds: ["event-1", "event-2"],
+      options: [],
+      reason: "concurrent",
+      detectedAt: "2026-09-03T00:00:00.000Z",
+      resolved: false
+    }] }),
+    makeTask({ id: "unsynced", sync: { unsyncedEventCount: 2, localAhead: true } })
+  ];
+  assert.deepEqual(filterTasks(tasks, { status: "in_progress" }).map((task) => task.id), ["active"]);
+  assert.deepEqual(filterTasks(tasks, { attention: "active" }).map((task) => task.id), ["active"]);
+  assert.deepEqual(filterTasks(tasks, { attention: "handoff" }).map((task) => task.id), ["handoff"]);
+  assert.deepEqual(filterTasks(tasks, { attention: "blocked" }).map((task) => task.id), ["blocked"]);
+  assert.deepEqual(filterTasks(tasks, { attention: "conflict" }).map((task) => task.id), ["conflict"]);
+  assert.deepEqual(filterTasks(tasks, { attention: "unsynced" }).map((task) => task.id), ["unsynced"]);
+  assert.deepEqual(filterTasks(tasks, { status: "needs_review", attention: "conflict" }).map((task) => task.id), ["conflict"]);
+
+  const cwd = await mkdtemp(join(tmpdir(), "agent-task-sync-cli-task-filter-") );
+  const previousStateDir = process.env.TASK_SYNC_STATE_DIR;
+  process.env.TASK_SYNC_STATE_DIR = join(cwd, ".state");
+  try {
+    assert.equal(await run(["init", "project-1", "Filters"], cwd), ExitCode.ok);
+    assert.equal(await run(["task", "list", "--status", "unknown"], cwd), ExitCode.invalidInput);
+    assert.equal(await run(["task", "list", "--attention", "unknown"], cwd), ExitCode.invalidInput);
+    assert.equal(await run(["task", "list", "--status", "in_progress", "--attention", "active", "--json"], cwd), ExitCode.ok);
   } finally {
     if (previousStateDir === undefined) delete process.env.TASK_SYNC_STATE_DIR;
     else process.env.TASK_SYNC_STATE_DIR = previousStateDir;

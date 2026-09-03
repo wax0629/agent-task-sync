@@ -23,7 +23,7 @@ import {
 import type { AcceptanceCriterion, PhaseState, TaskStatus, VerificationResult } from "@agent-task-sync/domain";
 import { GitSyncError, GitTextConflictError, NoRemoteError } from "@agent-task-sync/sync-git";
 import { ExitCode } from "./exit-codes.js";
-import { formatConflicts, formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry } from "./format.js";
+import { filterTasks, formatConflicts, formatContext, formatRebuild, formatStatus, formatSync, formatTask, formatTaskList, type ConflictListEntry, type TaskAttention } from "./format.js";
 import { createRuntime } from "./runtime.js";
 
 interface ParsedArgs {
@@ -121,6 +121,13 @@ function statusValue(value: string | undefined): TaskStatus | undefined {
   const allowed: TaskStatus[] = ["planned", "in_progress", "blocked", "needs_review", "handoff_ready", "completed", "archived"];
   if (!allowed.includes(value as TaskStatus)) throw new CliInputError(`无效任务状态：${value}`);
   return value as TaskStatus;
+}
+
+function attentionValue(value: string | undefined): TaskAttention | undefined {
+  if (value === undefined) return undefined;
+  const allowed: TaskAttention[] = ["active", "handoff", "blocked", "conflict", "unsynced"];
+  if (!allowed.includes(value as TaskAttention)) throw new CliInputError(`无效待处理筛选：${value}，可选 active、handoff、blocked、conflict、unsynced。`);
+  return value as TaskAttention;
 }
 
 function parseJsonValue(value: string, label: string): unknown {
@@ -714,10 +721,14 @@ async function runCommand(argv: readonly string[], cwd: string): Promise<number>
     const nested: ParsedArgs = { ...parsed, args: parsed.args.slice(1) };
     if (subcommand === "create") return runTaskCreate(nested, runtime);
     if (subcommand === "list") {
-      ensureAllowed(nested, []);
+      ensureAllowed(nested, ["status", "attention"]);
       const status = await requireProject(runtime.app);
-      print(status.tasks, nested.json, formatTaskList(status.tasks));
-      return status.tasks.some((task) => task.conflicts.some((conflict) => !conflict.resolved)) ? ExitCode.conflict : ExitCode.ok;
+      const tasks = filterTasks(status.tasks, {
+        status: statusValue(option(nested.options, "status")),
+        attention: attentionValue(option(nested.options, "attention"))
+      });
+      print(tasks, nested.json, formatTaskList(tasks));
+      return tasks.some((task) => task.conflicts.some((conflict) => !conflict.resolved)) ? ExitCode.conflict : ExitCode.ok;
     }
     if (subcommand === "use") return runTaskUse(nested, runtime);
     if (subcommand === "update") return runTaskUpdate(nested, runtime);
