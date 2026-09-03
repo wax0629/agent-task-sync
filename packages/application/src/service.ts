@@ -82,7 +82,13 @@ export class ApplicationService implements TaskSyncService {
     const events = await this.dependencies.events.readProjectEvents(project?.projectId);
     const sync = await this.dependencies.sync.inspect();
     const tasks = this.reduceTasks(events).map((state) => this.withSyncSummary(state, sync));
-    return { project, tasks, sync };
+    const semanticConflict = tasks.some((state) => state.conflicts.some((conflict) => !conflict.resolved));
+    if (semanticConflict) {
+      for (const task of tasks) {
+        if (task.conflicts.some((conflict) => !conflict.resolved)) task.sync.conflict = true;
+      }
+    }
+    return { project, tasks, sync: semanticConflict ? { ...sync, conflict: true } : sync };
   }
 
   async createTask(input: CreateTaskInput, actor: Actor): Promise<TaskState> {
@@ -194,7 +200,8 @@ export class ApplicationService implements TaskSyncService {
     const pull = await this.dependencies.sync.pull();
     const rebuilt = await this.rebuildInternal(undefined, inspection);
     const push = await this.dependencies.sync.push();
-    return { inspection, pull, push, rebuilt };
+    const semanticConflict = rebuilt.states.some((state) => state.conflicts.some((conflict) => !conflict.resolved));
+    return { inspection: semanticConflict ? { ...inspection, conflict: true } : inspection, pull, push, rebuilt };
   }
 
   async getContext(taskId: string): Promise<ContinuationContext> {

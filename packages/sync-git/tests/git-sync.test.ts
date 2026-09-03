@@ -136,8 +136,8 @@ test("text conflicts are reported separately from ordinary Git failures", async 
     if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return ok();
     if (args[0] === "remote" && args[1] === "get-url") return ok("https://github.com/example/project.git\n");
     if (args[0] === "rev-parse" && args[1] === "--verify") return ok("abc123\n");
-    if (args[0] === "merge") return fail("CONFLICT (content): Merge conflict in .task-sync/tasks/task-1/task.yaml");
-    if (args[0] === "diff") return ok(".task-sync/tasks/task-1/task.yaml\n");
+    if (args[0] === "merge") return fail("CONFLICT (content): Merge conflict in .task-sync/tasks/task-1/events/mac/codex/session.jsonl");
+    if (args[0] === "diff") return ok(".task-sync/tasks/task-1/events/mac/codex/session.jsonl\n");
     return baseScript(args);
   });
   const port = new FileGitSyncPort({ repoRoot: fixture.repoRoot, worktreePath: fixture.worktreePath, runner });
