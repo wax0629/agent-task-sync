@@ -274,6 +274,8 @@ Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可�
 
 协议版本、组件兼容关系、升级/回滚步骤以及真实 Windows/Agent/用户验收模板见 [`docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md`](docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md)。
 
+实体 Windows 的安装、跨设备恢复、Hook 冒烟测试和结果回传步骤见 [`docs/verification/agent-task-sync-windows-handoff-v0.1.md`](docs/verification/agent-task-sync-windows-handoff-v0.1.md)。
+
 ## 环境变量
 
 常用覆盖项：
