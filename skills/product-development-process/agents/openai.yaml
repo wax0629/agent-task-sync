@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Development Process"
+  short_description: "Govern complete product development workflows"
+  default_prompt: "Use $product-development-process to drive this product from discovery through implementation, verification, and release."
