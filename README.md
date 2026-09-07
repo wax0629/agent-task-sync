@@ -294,6 +294,7 @@ Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可�
 | `TASK_SYNC_DEVICE_ID` | 写入事件的设备标识 |
 | `TASK_SYNC_AGENT_ID` | 写入事件的 Agent 标识 |
 | `TASK_SYNC_SESSION_ID` | 覆盖当前会话标识 |
+| `TASK_SYNC_CLI_PATH` | 覆盖适配器调用的 CLI；可填写 `task-sync` 或本地 `.js` 入口路径 |
 
 ## 退出码
 

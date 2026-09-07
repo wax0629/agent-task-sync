@@ -190,13 +190,21 @@ export class FileGitSyncPort implements GitSyncPort {
       const before = await countEventLines(this.stateDirectory);
       const status = await this.run(["status", "--porcelain", "--", ".task-sync"], this.worktreePath, "push");
       this.assertSuccess(status, "push", ["status", "--porcelain", "--", ".task-sync"]);
+      let committed = false;
       if (status.stdout.trim()) {
-        changed = true;
         const add = await this.run(["add", "--", ".task-sync"], this.worktreePath, "push");
         this.assertSuccess(add, "push", ["add", "--", ".task-sync"]);
         const commit = await this.run(["commit", "-m", "chore(task-sync): update task state"], this.worktreePath, "push");
-        this.assertSuccess(commit, "push", ["commit", "-m", "chore(task-sync): update task state"]);
+        const commitOutput = `${commit.stderr}\n${commit.stdout}`;
+        // Git for Windows can report a normalized line-ending change from
+        // `status` and then find no staged content after `add`. Treat that
+        // explicit no-op as clean; all other commit failures remain fatal.
+        if (commit.exitCode !== 0 && !/nothing to commit|working tree clean/i.test(commitOutput)) {
+          this.assertSuccess(commit, "push", ["commit", "-m", "chore(task-sync): update task state"]);
+        }
+        committed = commit.exitCode === 0;
       }
+      changed ||= committed;
       const args = ["push", this.remoteName, `HEAD:refs/heads/${this.stateBranch}`];
       const pushed = await this.run(args, this.worktreePath, "push");
       if (pushed.exitCode === 0) {
@@ -309,7 +317,11 @@ export class FileGitSyncPort implements GitSyncPort {
 
   private assertSuccess(result: GitCommandResult, operation: string, args: readonly string[]): void {
     if (result.exitCode !== 0) {
-      throw new GitSyncError(`Git ${operation} failed${result.stderr ? `: ${result.stderr.trim()}` : ""}`, operation, args, result.exitCode, result.stderr);
+      const detail = [result.stderr, result.stdout]
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join("\n");
+      throw new GitSyncError(`Git ${operation} failed${detail ? `: ${detail}` : ""}`, operation, args, result.exitCode, detail || undefined);
     }
   }
 }
