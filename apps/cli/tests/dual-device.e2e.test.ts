@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -62,7 +62,7 @@ async function runCompiledHook(entrypoint: string, hook: string, cwd: string, in
   delete environment.TASK_SYNC_DEVICE_ID;
   delete environment.TASK_SYNC_AGENT_ID;
   environment.TASK_SYNC_CLI_PATH = cliPath;
-  environment.PATH = `${join(process.cwd(), "node_modules", ".bin")}:${environment.PATH ?? ""}`;
+  environment.PATH = `${join(process.cwd(), "node_modules", ".bin")}${delimiter}${environment.PATH ?? ""}`;
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [entrypoint, hook], {
       cwd,

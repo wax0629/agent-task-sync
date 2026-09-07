@@ -130,6 +130,22 @@ test("non-fast-forward push performs one pull retry and never uses force", async
   assert.equal(runner.calls.filter(({ args }) => args[0] === "fetch").length, 1);
 });
 
+test("normalized status changes with no staged content do not fail push", async () => {
+  const fixture = await worktreeFixture();
+  const runner = new ScriptedRunner((args) => {
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return ok();
+    if (args[0] === "remote" && args[1] === "get-url") return ok("https://github.com/example/project.git\n");
+    if (args[0] === "status") return ok(" M .task-sync\n");
+    if (args[0] === "commit") return { stdout: "On branch task-sync/state\nnothing to commit, working tree clean\n", stderr: "", exitCode: 1 };
+    if (args[0] === "push") return ok();
+    return baseScript(args);
+  });
+  const port = new FileGitSyncPort({ repoRoot: fixture.repoRoot, worktreePath: fixture.worktreePath, runner });
+  const result = await port.push();
+  assert.equal(result.changed, false);
+  assert.equal(runner.calls.some(({ args }) => args[0] === "push"), true);
+});
+
 test("text conflicts are reported separately from ordinary Git failures", async () => {
   const fixture = await worktreeFixture();
   const runner = new ScriptedRunner((args) => {
