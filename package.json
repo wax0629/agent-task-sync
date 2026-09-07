@@ -1,8 +1,26 @@
 {
   "name": "agent-task-sync",
   "version": "0.1.0",
-  "private": true,
+  "description": "轻量的多 Agent、多设备任务接续 CLI",
+  "private": false,
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wax0629/agent-task-sync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wax0629/agent-task-sync/issues"
+  },
+  "homepage": "https://github.com/wax0629/agent-task-sync#readme",
+  "keywords": [
+    "agent",
+    "task-sync",
+    "handoff",
+    "codex",
+    "claude-code",
+    "pi"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -11,16 +29,53 @@
     "apps/*",
     "adapters/*"
   ],
+  "bin": {
+    "task-sync": "apps/cli/dist/bundle.js",
+    "task-sync-adapter-codex": "adapters/codex/dist/bundle.js",
+    "task-sync-adapter-claude": "adapters/claude-code/dist/bundle.js",
+    "task-sync-adapter-pi": "adapters/pi/dist/bundle.js"
+  },
+  "files": [
+    "apps/cli/dist/bundle.js",
+    "adapters/codex/dist/bundle.js",
+    "adapters/codex/codex-hooks.json",
+    "adapters/codex/README.md",
+    "adapters/claude-code/dist/bundle.js",
+    "adapters/claude-code/claude-hooks.json",
+    "adapters/claude-code/commands",
+    "adapters/claude-code/README.md",
+    "adapters/pi/dist/bundle.js",
+    "adapters/pi/pi-hooks.json",
+    "adapters/pi/README.md",
+    "skills/agent-task-sync",
+    "schemas",
+    "docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md",
+    "docs/verification/agent-task-sync-windows-handoff-v0.1.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "npm run build --workspace=@agent-task-sync/domain && npm run build --workspace=@agent-task-sync/application && npm run build --workspace=@agent-task-sync/renderer-markdown && npm run build --workspace=@agent-task-sync/store-files && npm run build --workspace=@agent-task-sync/project-registry && npm run build --workspace=@agent-task-sync/sync-git && npm run build --workspace=@agent-task-sync/adapter-contract && npm run build --workspace=@agent-task-sync/cli && npm run build --workspace=@agent-task-sync/adapter-codex && npm run build --workspace=@agent-task-sync/adapter-claude-code && npm run build --workspace=@agent-task-sync/adapter-pi",
     "test": "npm run build && npm run test --workspaces --if-present && npm run test:contract",
     "test:contract": "tsx --test tests/contract.test.ts tests/skill-contract.test.ts tests/hook-process.test.ts",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "bundle": "node scripts/build-release.mjs",
+    "build:release": "npm run build && npm run bundle",
+    "test:release": "npm run build:release && node scripts/release-smoke.mjs",
+    "prepack": "npm run build:release"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
     "ajv": "^8.17.1",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }
