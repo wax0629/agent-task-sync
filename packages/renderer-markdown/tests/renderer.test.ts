@@ -56,11 +56,17 @@ test("renderer exposes the current handoff and preserves handoff details in prog
     status: "in_progress",
     handoff: {
       id: "handoff-1",
+      goal: "交接目标",
+      constraints: ["保持事件为事实来源"],
       completedWork: ["完成 checkpoint"],
       incompleteWork: ["运行集成测试"],
+      blockedWork: ["等待远程凭据"],
       keyDecisions: [{ decision: "保留事件事实来源", reason: "可重建" }],
       knownErrors: [],
       nextStep: "运行集成测试",
+      criticalContext: ["当前状态来自事件重建"],
+      filesRead: ["README.md"],
+      filesChanged: ["src/renderer.ts"],
       relevantFiles: ["src/renderer.ts"],
       testSummary: "renderer tests pass",
       targetAgent: "claude-code",
@@ -75,9 +81,15 @@ test("renderer exposes the current handoff and preserves handoff details in prog
     type: "handoff_created",
     payload: {
       handoffId: "handoff-1",
+      goal: "交接目标",
+      constraints: ["保持事件为事实来源"],
       completedWork: ["完成 checkpoint"],
       incompleteWork: ["运行集成测试"],
+      blockedWork: ["等待远程凭据"],
       nextStep: "运行集成测试",
+      criticalContext: ["当前状态来自事件重建"],
+      filesRead: ["README.md"],
+      filesChanged: ["src/renderer.ts"],
       relevantFiles: ["src/renderer.ts"],
       testSummary: "renderer tests pass"
     },
@@ -96,6 +108,18 @@ test("renderer exposes the current handoff and preserves handoff details in prog
   assert.match(documents.progress, /创建交接 handoff-1/);
   assert.match(documents.progress, /接受交接 handoff-1/);
   assert.match(documents.handoff ?? "", /接受时间：2026-09-03T03:00:00.000Z/);
+  assert.match(documents.handoff ?? "", /## Goal/);
+  assert.match(documents.handoff ?? "", /## Constraints/);
+  assert.match(documents.handoff ?? "", /### Done/);
+  assert.match(documents.handoff ?? "", /### In Progress/);
+  assert.match(documents.handoff ?? "", /### Blocked/);
+  assert.match(documents.handoff ?? "", /## Decisions/);
+  assert.match(documents.handoff ?? "", /## Next Steps/);
+  assert.match(documents.handoff ?? "", /## Context/);
+  assert.match(documents.handoff ?? "", /等待远程凭据/);
+  assert.match(documents.handoff ?? "", /读取文件：README\.md/);
+  assert.match(documents.handoff ?? "", /修改文件：src\/renderer\.ts/);
+  assert.doesNotMatch(documents.handoff ?? "", /## 决策与错误/);
 });
 
 test("renderer creates a compact project progress overview", () => {

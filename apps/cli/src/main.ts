@@ -628,7 +628,7 @@ function errorList(value: unknown, label: string): Array<{ error: string; attemp
 }
 
 async function runHandoffCreate(parsed: ParsedArgs, runtime: ReturnType<typeof createRuntime>): Promise<number> {
-  ensureAllowed(parsed, ["yes", "task", "input", "handoff-id", "completed", "incomplete", "next-step", "file", "files", "test-summary", "target-agent", "decisions", "errors"]);
+  ensureAllowed(parsed, ["yes", "task", "input", "handoff-id", "goal", "constraints", "completed", "incomplete", "blocked", "next-step", "critical-context", "file", "files", "files-read", "files-changed", "test-summary", "target-agent", "decisions", "errors"]);
   requireYes(parsed);
   const input = option(parsed.options, "input") ? await readJsonObject(required(option(parsed.options, "input"), "输入文件")) : {};
   await requireProject(runtime.app);
@@ -640,11 +640,17 @@ async function runHandoffCreate(parsed: ParsedArgs, runtime: ReturnType<typeof c
   const handoff: HandoffInput = {
     taskId,
     handoffId: option(parsed.options, "handoff-id") ?? inputString(input, "handoffId", "handoff_id"),
+    goal: option(parsed.options, "goal") ?? inputString(input, "goal"),
+    constraints: mergeList(inputValue(input, "constraints"), optionList(parsed, ["constraints"]), "constraints"),
     completedWork: mergeList(inputValue(input, "completedWork", "completed_work"), optionList(parsed, ["completed"]), "completedWork"),
     incompleteWork: mergeList(inputValue(input, "incompleteWork", "incomplete_work"), optionList(parsed, ["incomplete"]), "incompleteWork"),
+    blockedWork: mergeList(inputValue(input, "blockedWork", "blocked_work"), optionList(parsed, ["blocked"]), "blockedWork"),
     keyDecisions: decisions,
     knownErrors: errors,
     nextStep: option(parsed.options, "next-step") ?? nextStepInput,
+    criticalContext: mergeList(inputValue(input, "criticalContext", "critical_context"), optionList(parsed, ["critical-context"]), "criticalContext"),
+    filesRead: mergeList(inputValue(input, "filesRead", "files_read"), optionList(parsed, ["files-read"]), "filesRead"),
+    filesChanged: mergeList(inputValue(input, "filesChanged", "files_changed"), optionList(parsed, ["files-changed"]), "filesChanged"),
     relevantFiles: mergeList(inputValue(input, "relevantFiles", "relevant_files"), optionList(parsed, ["file", "files"]), "relevantFiles"),
     testSummary: option(parsed.options, "test-summary") ?? inputString(input, "testSummary", "test_summary"),
     targetAgent: option(parsed.options, "target-agent") ?? inputString(input, "targetAgent", "target_agent"),

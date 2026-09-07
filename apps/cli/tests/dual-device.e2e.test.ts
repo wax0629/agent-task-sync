@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -29,11 +29,15 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 }
 
 async function runCli(cwd: string, stateWorktree: string, deviceId: string, ...args: string[]): Promise<CliResult> {
+  return runAgentCli(cwd, stateWorktree, deviceId, deviceId === "mac" ? "codex" : "claude-code", ...args);
+}
+
+async function runAgentCli(cwd: string, stateWorktree: string, deviceId: string, agentId: string, ...args: string[]): Promise<CliResult> {
   const environment = { ...process.env };
   delete environment.TASK_SYNC_STATE_DIR;
   environment.TASK_SYNC_WORKTREE_PATH = stateWorktree;
   environment.TASK_SYNC_DEVICE_ID = deviceId;
-  environment.TASK_SYNC_AGENT_ID = deviceId === "mac" ? "codex" : "claude-code";
+  environment.TASK_SYNC_AGENT_ID = agentId;
   try {
     const result = await execFileAsync(process.execPath, [cliPath, ...args], {
       cwd,
@@ -49,6 +53,49 @@ async function runCli(cwd: string, stateWorktree: string, deviceId: string, ...a
       stderr: typeof failure.stderr === "string" ? failure.stderr : failure.message ?? ""
     };
   }
+}
+
+async function runCompiledHook(entrypoint: string, hook: string, cwd: string, input: string): Promise<CliResult> {
+  const environment = { ...process.env };
+  delete environment.TASK_SYNC_STATE_DIR;
+  delete environment.TASK_SYNC_WORKTREE_PATH;
+  delete environment.TASK_SYNC_DEVICE_ID;
+  delete environment.TASK_SYNC_AGENT_ID;
+  environment.PATH = `${join(process.cwd(), "node_modules", ".bin")}:${environment.PATH ?? ""}`;
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [entrypoint, hook], {
+      cwd,
+      env: environment,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer | string) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer | string) => { stderr += chunk.toString(); });
+    child.once("error", (error) => {
+      const failure = error as NodeJS.ErrnoException;
+      resolve({ exitCode: typeof failure.code === "number" ? failure.code : 1, stdout, stderr: stderr || failure.message });
+    });
+    child.once("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    child.stdin.end(input);
+  });
+}
+
+function hookJson<T>(result: CliResult, label: string): T {
+  assert.equal(result.exitCode, 0, `${label} failed: ${result.stderr || result.stdout}`);
+  assert.equal(result.stderr, "", `${label} wrote unexpected stderr: ${result.stderr}`);
+  const lines = result.stdout.trim().split(/\r?\n/);
+  assert.equal(lines.length, 1, `${label} must emit exactly one JSON line`);
+  return JSON.parse(lines[0] ?? "") as T;
+}
+
+async function filesRecursively(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? filesRecursively(path) : [path];
+  }));
+  return nested.flat();
 }
 
 function json<T>(result: CliResult, label: string): T {
@@ -223,6 +270,174 @@ test("CLI completes a dual-device continuation flow through a real Git remote", 
     assert.equal(await git(fixture.windows, "status", "--porcelain"), "");
     await assert.rejects(readFile(join(fixture.mac, ".task-sync", "tasks", "task-1", "task.yaml"), "utf8"), { code: "ENOENT" });
     await assert.rejects(readFile(join(fixture.windows, ".task-sync", "tasks", "task-1", "task.yaml"), "utf8"), { code: "ENOENT" });
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("compiled Codex and Pi hooks complete a same-Mac continuation loop", async () => {
+  const fixture = await repositoryFixture();
+  const stateWorktree = join(fixture.root, "mac-state");
+  const codexCheckpoint = join(fixture.root, "codex-checkpoint.json");
+  const codexHandoff = join(fixture.root, "codex-handoff.json");
+  const piCheckpoint = join(fixture.root, "pi-checkpoint.json");
+  const codexHook = fileURLToPath(new URL("../../../adapters/codex/dist/hook.js", import.meta.url));
+  const piHook = fileURLToPath(new URL("../../../adapters/pi/dist/hook.js", import.meta.url));
+  const hookEnvironment = (sessionId: string, extra: Record<string, string> = {}) => JSON.stringify({
+    cwd: fixture.mac,
+    ...extra,
+    environment: {
+      TASK_SYNC_WORKTREE_PATH: stateWorktree,
+      TASK_SYNC_DEVICE_ID: "mac",
+      TASK_SYNC_SESSION_ID: sessionId
+    }
+  });
+  try {
+    json(await runCli(fixture.mac, stateWorktree, "mac", "init", "my-project", "Agent Task Sync", "--json"), "Mac init");
+    json(await runCli(
+      fixture.mac,
+      stateWorktree,
+      "mac",
+      "task",
+      "create",
+      "task-1",
+      "实现 Mac 多 Agent 接续",
+      "--goal",
+      "让 Codex 和 Pi 在同一台 Mac 上接力完成任务",
+      "--acceptance",
+      "Pi 可以从 current-task 恢复上下文",
+      "--yes",
+      "--json"
+    ), "Mac task create");
+    json(await runCli(fixture.mac, stateWorktree, "mac", "task", "use", "task-1", "--yes", "--json"), "Mac task use");
+
+    await writeFile(codexCheckpoint, JSON.stringify({
+      taskId: "task-1",
+      summary: "Codex 已完成状态链路",
+      currentFocus: "等待 Pi 接受交接",
+      recentCompleted: ["确认同 Mac 状态 worktree"],
+      nextAction: "Pi 接受 handoff 并继续实现",
+      filesRead: ["README.md"],
+      filesChanged: ["packages/adapter-contract/src/adapter.ts"],
+      verification: [{ command: "npm test", result: "passed", status: "passed" }]
+    }), "utf8");
+    const codexStop = hookJson<{ continue: true; hook: string; output?: string }>(await runCompiledHook(
+      codexHook,
+      "stop",
+      fixture.mac,
+      hookEnvironment("codex-hook", { taskId: "task-1", checkpointInputFile: codexCheckpoint, confirmed: true })
+    ), "Codex checkpoint hook");
+    assert.equal(codexStop.continue, true);
+    assert.equal(codexStop.hook, "stop");
+
+    await writeFile(codexHandoff, JSON.stringify({
+      taskId: "task-1",
+      goal: "让 Codex 和 Pi 在同一台 Mac 上接力完成任务",
+      constraints: ["只同步任务状态，不同步完整聊天"],
+      completedWork: ["Codex 已完成状态链路"],
+      incompleteWork: ["Pi 接受 handoff 并继续实现"],
+      blockedWork: [],
+      keyDecisions: [{ decision: "使用共享 current-task 指针", reason: "避免 Agent 手工复制 taskId" }],
+      knownErrors: [],
+      nextStep: "运行 Pi checkpoint hook",
+      criticalContext: ["同一 Mac 的 Codex 和 Pi 使用同一个状态 worktree"],
+      filesRead: ["README.md"],
+      filesChanged: ["packages/adapter-contract/src/adapter.ts"],
+      relevantFiles: ["packages/adapter-contract/src/adapter.ts"],
+      testSummary: "adapter contract passed",
+      targetAgent: "pi"
+    }), "utf8");
+    const codexHandoffResult = hookJson<{ continue: true; hook: string; output?: string }>(await runCompiledHook(
+      codexHook,
+      "handoff",
+      fixture.mac,
+      hookEnvironment("codex-hook", { taskId: "task-1", handoffInputFile: codexHandoff, confirmed: true })
+    ), "Codex handoff hook");
+    assert.equal(codexHandoffResult.continue, true);
+    assert.equal(codexHandoffResult.hook, "handoff");
+    json(await runCli(fixture.mac, stateWorktree, "mac", "sync", "--json"), "Codex sync");
+
+    const piSession = hookJson<{ continue: true; hook: string; output?: string }>(await runCompiledHook(
+      piHook,
+      "session_start",
+      fixture.mac,
+      hookEnvironment("pi-session")
+    ), "Pi session start");
+    assert.equal(piSession.continue, true);
+    assert.equal(piSession.hook, "session_start");
+    assert.match(piSession.output ?? "", /实现 Mac 多 Agent 接续/);
+    assert.match(piSession.output ?? "", /Pi 接受 handoff/);
+
+    const beforeAccept = json<{ tasks: Array<{ handoff?: { id?: string } }> }>(await runAgentCli(
+      fixture.mac,
+      stateWorktree,
+      "mac",
+      "pi",
+      "status",
+      "--json"
+    ), "Pi status");
+    const handoffId = beforeAccept.tasks[0]?.handoff?.id;
+    assert.ok(handoffId, "Codex handoff should be visible to Pi");
+    const accepted = json<{ status: string; ownership?: { agentId?: string; deviceId?: string } }>(await runAgentCli(
+      fixture.mac,
+      stateWorktree,
+      "mac",
+      "pi",
+      "handoff",
+      "accept",
+      "task-1",
+      handoffId,
+      "--yes",
+      "--json"
+    ), "Pi handoff accept");
+    assert.equal(accepted.status, "in_progress");
+    assert.equal(accepted.ownership?.agentId, "pi");
+    assert.equal(accepted.ownership?.deviceId, "mac");
+
+    await writeFile(piCheckpoint, JSON.stringify({
+      taskId: "task-1",
+      summary: "Pi 已接续并完成验证",
+      currentFocus: "确认 Codex 可以回读 Pi 的 checkpoint",
+      recentCompleted: ["接受 Codex handoff"],
+      nextAction: "Codex 回读当前上下文",
+      filesRead: [".task-sync/tasks/task-1/handoff.md"],
+      filesChanged: ["packages/adapter-contract/tests/adapter.test.ts"],
+      verification: [{ command: "npm run typecheck", result: "passed", status: "passed" }]
+    }), "utf8");
+    const piStop = hookJson<{ continue: true; hook: string; output?: string }>(await runCompiledHook(
+      piHook,
+      "stop",
+      fixture.mac,
+      hookEnvironment("pi-hook", { taskId: "task-1", checkpointInputFile: piCheckpoint, confirmed: true })
+    ), "Pi checkpoint hook");
+    assert.equal(piStop.continue, true);
+    assert.equal(piStop.hook, "stop");
+    json(await runAgentCli(fixture.mac, stateWorktree, "mac", "pi", "sync", "--json"), "Pi sync");
+
+    const codexSession = hookJson<{ continue: true; hook: string; output?: string }>(await runCompiledHook(
+      codexHook,
+      "session_start",
+      fixture.mac,
+      hookEnvironment("codex-session")
+    ), "Codex session resume");
+    assert.equal(codexSession.continue, true);
+    assert.match(codexSession.output ?? "", /Pi 已接续并完成验证/);
+    assert.match(codexSession.output ?? "", /Codex 回读当前上下文/);
+
+    const eventDirectory = join(stateWorktree, ".task-sync", "tasks", "task-1", "events");
+    const eventTexts = await Promise.all((await filesRecursively(eventDirectory)).filter((path) => path.endsWith(".jsonl")).map((path) => readFile(path, "utf8")));
+    const events = eventTexts.flatMap((content) => content.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line) as { writer: { agentId: string; deviceId: string } }));
+    assert.ok(events.some((event) => event.writer.agentId === "codex"), "event log should include Codex writes");
+    assert.ok(events.some((event) => event.writer.agentId === "pi"), "event log should include Pi writes");
+    assert.equal(events.every((event) => event.writer.deviceId === "mac"), true);
+    assert.equal(await git(fixture.mac, "branch", "--show-current"), "main\n");
+    assert.equal(await git(fixture.mac, "status", "--porcelain"), "");
+    const handoffDocument = await readFile(join(stateWorktree, ".task-sync", "tasks", "task-1", "handoff.md"), "utf8");
+    for (const heading of ["## Goal", "## Constraints", "## Progress", "### Done", "### In Progress", "### Blocked", "## Decisions", "## Next Steps", "## Context"]) {
+      assert.match(handoffDocument, new RegExp(heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+    assert.match(handoffDocument, /不同步完整聊天/);
+    assert.doesNotMatch(handoffDocument, /prompt|token/i);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

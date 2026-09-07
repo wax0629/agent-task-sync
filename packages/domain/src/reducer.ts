@@ -306,11 +306,17 @@ function applyEvent(state: TaskState, event: TaskEvent): void {
       const handoff = payload as HandoffCreatedPayload;
       state.handoff = {
         id: handoff.handoffId ?? `handoff-${event.eventId}`,
+        goal: nonBlank(handoff.goal) ? handoff.goal : undefined,
+        constraints: uniqueStrings(handoff.constraints ?? []),
         completedWork: uniqueStrings(handoff.completedWork ?? []),
         incompleteWork: uniqueStrings(handoff.incompleteWork ?? []),
+        blockedWork: uniqueStrings(handoff.blockedWork ?? []),
         keyDecisions: handoff.keyDecisions ? [...handoff.keyDecisions] : [],
         knownErrors: handoff.knownErrors ? [...handoff.knownErrors] : [],
         nextStep: nonBlank(handoff.nextStep) ? handoff.nextStep : undefined,
+        criticalContext: uniqueStrings(handoff.criticalContext ?? []),
+        filesRead: uniqueStrings(handoff.filesRead ?? []),
+        filesChanged: uniqueStrings(handoff.filesChanged ?? []),
         relevantFiles: uniqueStrings(handoff.relevantFiles ?? []),
         testSummary: nonBlank(handoff.testSummary) ? handoff.testSummary : undefined,
         targetAgent: nonBlank(handoff.targetAgent) ? handoff.targetAgent : undefined,

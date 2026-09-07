@@ -100,11 +100,17 @@ export interface SyncSummary {
 
 export interface HandoffState {
   id: string;
+  goal?: string;
+  constraints?: string[];
   completedWork: string[];
   incompleteWork: string[];
+  blockedWork?: string[];
   keyDecisions: Array<{ decision: string; reason?: string }>;
   knownErrors: Array<{ error: string; attempts?: string }>;
   nextStep?: string;
+  criticalContext?: string[];
+  filesRead?: string[];
+  filesChanged?: string[];
   relevantFiles: string[];
   testSummary?: string;
   targetAgent?: string;
@@ -231,11 +237,17 @@ export interface VerificationRecordedPayload {
 
 export interface HandoffCreatedPayload {
   handoffId?: string;
+  goal?: string;
+  constraints?: string[];
   completedWork?: string[];
   incompleteWork?: string[];
+  blockedWork?: string[];
   keyDecisions?: Array<{ decision: string; reason?: string }>;
   knownErrors?: Array<{ error: string; attempts?: string }>;
   nextStep?: string | null;
+  criticalContext?: string[];
+  filesRead?: string[];
+  filesChanged?: string[];
   relevantFiles?: string[];
   testSummary?: string;
   targetAgent?: string;
