@@ -1,6 +1,6 @@
 {
   "name": "agent-task-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "轻量的多 Agent、多设备任务接续 CLI",
   "private": false,
   "type": "module",
@@ -51,6 +51,8 @@
     "schemas",
     "docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md",
     "docs/verification/agent-task-sync-windows-handoff-v0.1.md",
+    "docs/release/agent-task-sync-v0.2.0-release-notes.md",
+    "docs/release/agent-task-sync-v0.2.0-release-checklist.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -61,9 +63,11 @@
   "scripts": {
     "build": "npm run build --workspace=@agent-task-sync/domain && npm run build --workspace=@agent-task-sync/application && npm run build --workspace=@agent-task-sync/renderer-markdown && npm run build --workspace=@agent-task-sync/store-files && npm run build --workspace=@agent-task-sync/project-registry && npm run build --workspace=@agent-task-sync/sync-git && npm run build --workspace=@agent-task-sync/adapter-contract && npm run build --workspace=@agent-task-sync/cli && npm run build --workspace=@agent-task-sync/adapter-codex && npm run build --workspace=@agent-task-sync/adapter-claude-code && npm run build --workspace=@agent-task-sync/adapter-pi",
     "test": "npm run build && npm run test --workspaces --if-present && npm run test:contract",
-    "test:contract": "tsx --test tests/contract.test.ts tests/skill-contract.test.ts tests/hook-process.test.ts",
+    "test:contract": "tsx --test tests/contract.test.ts tests/skill-contract.test.ts tests/hook-process.test.ts tests/release-contract.test.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "bundle": "node scripts/build-release.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "release:assets": "node scripts/create-release-assets.mjs",
     "build:release": "npm run build && npm run bundle",
     "test:release": "npm run build:release && node scripts/release-smoke.mjs",
     "prepack": "npm run build:release"

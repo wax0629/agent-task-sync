@@ -14,3 +14,6 @@ dist/
 # Logs
 *.log
 npm-debug.log*
+
+# Local release artifacts
+/release/

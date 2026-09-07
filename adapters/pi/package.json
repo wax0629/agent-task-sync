@@ -1,14 +1,14 @@
 {
   "name": "@agent-task-sync/adapter-pi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "private": true,
   "bin": {
     "task-sync-adapter-pi": "dist/hook.js"
   },
   "dependencies": {
-    "@agent-task-sync/adapter-contract": "0.1.0",
-    "@agent-task-sync/cli": "0.1.0"
+    "@agent-task-sync/adapter-contract": "0.2.0",
+    "@agent-task-sync/cli": "0.2.0"
   },
   "exports": {
     ".": {
