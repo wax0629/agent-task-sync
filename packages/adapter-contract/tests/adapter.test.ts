@@ -19,6 +19,7 @@ const ok = (stdout = "{}"): CliResult => ({ exitCode: 0, stdout, stderr: "" });
 test("CLI contract builds explicit, shell-free invocations", () => {
   assert.deepEqual(statusInvocation("/repo"), { executable: "task-sync", args: ["status", "--json"], cwd: "/repo" });
   assert.deepEqual(contextInvocation("task-1", "/repo"), { executable: "task-sync", args: ["context", "task-1", "--format", "json"], cwd: "/repo" });
+  assert.deepEqual(contextInvocation(undefined, "/repo"), { executable: "task-sync", args: ["context", "--format", "json"], cwd: "/repo" });
   assert.deepEqual(checkpointInvocation({ taskId: "task-1", inputFile: "/tmp/checkpoint.json", confirmed: true }, "/repo").args, ["checkpoint", "--task", "task-1", "--input", "/tmp/checkpoint.json", "--yes"]);
   assert.deepEqual(handoffInvocation({ taskId: "task-1", inputFile: "/tmp/handoff.json" }, "/repo").args, ["handoff", "create", "--task", "task-1", "--input", "/tmp/handoff.json"]);
 });
@@ -30,6 +31,17 @@ test("session start reads status and context through the same CLI contract", asy
   assert.equal(result.continue, true);
   assert.equal(result.output, "# Continuation");
   assert.deepEqual(executor.calls.map((call) => call.args), [["status", "--json"], ["context", "task-1", "--format", "json"]]);
+});
+
+test("session start falls back to the shared current-task pointer and preserves adapter identity", async () => {
+  const executor = new FakeExecutor((invocation) => invocation.args[0] === "status" ? ok('{"currentTaskId":"task-1"}') : ok("# Current task"));
+  const adapter = createCliAgentAdapter({ name: "pi", executor });
+  const result = await adapter.sessionStart({ cwd: "/repo" });
+  assert.equal(result.continue, true);
+  assert.equal(result.output, "# Current task");
+  assert.deepEqual(executor.calls.map((call) => call.args), [["status", "--json"], ["context", "--format", "json"]]);
+  assert.equal(executor.calls[0]?.env?.TASK_SYNC_AGENT_ID, "pi");
+  assert.equal(executor.calls[1]?.env?.TASK_SYNC_AGENT_ID, "pi");
 });
 
 test("unconfirmed stop only returns a candidate and never invokes a write", async () => {
@@ -50,6 +62,7 @@ test("confirmed stop invokes checkpoint and hook failures remain non-blocking", 
   assert.match(result.warning ?? "", /CLI unavailable/);
   assert.equal(executor.calls.length, 1);
   assert.equal(executor.calls[0]?.args.at(-1), "--yes");
+  assert.equal(executor.calls[0]?.env?.TASK_SYNC_AGENT_ID, "codex");
 });
 
 test("handoff follows the same confirmation boundary as checkpoint", async () => {
@@ -108,4 +121,11 @@ test("handoff dispatch keeps its own hook name and confirmation boundary", async
   const accepted = await runHook(adapter, "handoff", '{"cwd":"/repo","taskId":"task-1","handoffInputFile":"/tmp/handoff.json","confirmed":true}', "/repo");
   assert.equal(accepted.hook, "handoff");
   assert.equal(executor.calls.length, 1);
+});
+
+test("explicit hook environment can override the adapter identity", async () => {
+  const executor = new FakeExecutor(ok("written"));
+  const adapter = createCliAgentAdapter({ name: "codex", executor });
+  await adapter.stop({ cwd: "/repo", taskId: "task-1", checkpointInputFile: "/tmp/checkpoint.json", confirmed: true, environment: { TASK_SYNC_AGENT_ID: "codex-preview" } });
+  assert.equal(executor.calls[0]?.env?.TASK_SYNC_AGENT_ID, "codex-preview");
 });
