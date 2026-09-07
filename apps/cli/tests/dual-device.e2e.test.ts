@@ -62,7 +62,8 @@ async function runCompiledHook(entrypoint: string, hook: string, cwd: string, in
   delete environment.TASK_SYNC_DEVICE_ID;
   delete environment.TASK_SYNC_AGENT_ID;
   environment.TASK_SYNC_CLI_PATH = cliPath;
-  environment.PATH = `${join(process.cwd(), "node_modules", ".bin")}${delimiter}${environment.PATH ?? ""}`;
+  const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  environment[pathKey] = `${join(process.cwd(), "node_modules", ".bin")}${delimiter}${environment[pathKey] ?? ""}`;
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [entrypoint, hook], {
       cwd,
