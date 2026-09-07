@@ -4,8 +4,8 @@ export function statusInvocation(cwd: string, executable = "task-sync"): CliInvo
   return { executable, args: ["status", "--json"], cwd };
 }
 
-export function contextInvocation(taskId: string, cwd: string, executable = "task-sync"): CliInvocation {
-  return { executable, args: ["context", taskId, "--format", "json"], cwd };
+export function contextInvocation(taskId: string | undefined, cwd: string, executable = "task-sync"): CliInvocation {
+  return { executable, args: ["context", ...(taskId ? [taskId] : []), "--format", "json"], cwd };
 }
 
 export function checkpointInvocation(input: CheckpointCommandInput, cwd: string, executable = "task-sync"): CliInvocation {

@@ -22,6 +22,10 @@ function errorMessage(result: CliResult): string {
   return result.stderr.trim() || `task-sync exited with code ${result.exitCode}`;
 }
 
+function invocationEnvironment(input: HookInput, adapterName: AdapterOptions["name"]): Record<string, string | undefined> {
+  return { TASK_SYNC_AGENT_ID: adapterName, ...input.environment };
+}
+
 function result(hook: HookName, invocations: CliInvocation[], value: Partial<AdapterHookResult> = {}): AdapterHookResult {
   return { continue: true, hook, invocations, ...value };
 }
@@ -51,12 +55,11 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
     async sessionStart(input: HookInput): Promise<AdapterHookResult> {
       return safe("session_start", async () => {
         const status = statusInvocation(input.cwd, executable);
-        const statusResult = await execute({ ...status, env: input.environment });
+        const statusResult = await execute({ ...status, env: invocationEnvironment(input, options.name) });
         const invocations = [status];
         if (!successful(statusResult)) return result("session_start", invocations, { warning: errorMessage(statusResult) });
-        if (!input.taskId) return result("session_start", invocations, { output: output(statusResult) });
         const context = contextInvocation(input.taskId, input.cwd, executable);
-        const contextResult = await execute({ ...context, env: input.environment });
+        const contextResult = await execute({ ...context, env: invocationEnvironment(input, options.name) });
         invocations.push(context);
         return successful(contextResult)
           ? result("session_start", invocations, { output: output(contextResult) })
@@ -66,9 +69,8 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
 
     async preCompact(input: HookInput): Promise<AdapterHookResult> {
       return safe("pre_compact", async () => {
-        if (!input.taskId) return result("pre_compact", [], { warning: "No active task selected; skipped context refresh." });
         const invocation = contextInvocation(input.taskId, input.cwd, executable);
-        const contextResult = await execute({ ...invocation, env: input.environment });
+        const contextResult = await execute({ ...invocation, env: invocationEnvironment(input, options.name) });
         return successful(contextResult)
           ? result("pre_compact", [invocation], { output: output(contextResult) })
           : result("pre_compact", [invocation], { warning: errorMessage(contextResult) });
@@ -88,7 +90,7 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
           });
         }
         const invocation = checkpointInvocation({ taskId: input.taskId, inputFile: input.checkpointInputFile, confirmed: true }, input.cwd, executable);
-        const checkpointResult = await execute({ ...invocation, env: input.environment });
+        const checkpointResult = await execute({ ...invocation, env: invocationEnvironment(input, options.name) });
         return successful(checkpointResult)
           ? result("stop", [invocation], { output: output(checkpointResult) })
           : result("stop", [invocation], { warning: errorMessage(checkpointResult) });
@@ -107,7 +109,7 @@ export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
             warning: "Handoff candidate is ready; user confirmation is required before writing."
           });
         }
-        const handoffResult = await execute({ ...invocation, env: input.environment });
+        const handoffResult = await execute({ ...invocation, env: invocationEnvironment(input, options.name) });
         return successful(handoffResult)
           ? result("handoff", [invocation], { output: output(handoffResult) })
           : result("handoff", [invocation], { warning: errorMessage(handoffResult) });
