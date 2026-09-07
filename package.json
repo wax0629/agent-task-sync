@@ -50,6 +50,7 @@
     "skills/agent-task-sync",
     "schemas",
     "docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md",
+    "docs/verification/agent-task-sync-v0.2.0-release-acceptance.md",
     "docs/verification/agent-task-sync-windows-handoff-v0.1.md",
     "docs/release/agent-task-sync-v0.2.0-release-notes.md",
     "docs/release/agent-task-sync-v0.2.0-release-checklist.md",

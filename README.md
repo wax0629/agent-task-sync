@@ -302,6 +302,8 @@ Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可�
 
 版本、校验和、发布资产与回滚说明见 [`docs/release/agent-task-sync-v0.2.0-release-notes.md`](docs/release/agent-task-sync-v0.2.0-release-notes.md)；发布门禁见 [`docs/release/agent-task-sync-v0.2.0-release-checklist.md`](docs/release/agent-task-sync-v0.2.0-release-checklist.md)。
 
+新用户可按 [`v0.2.0 发布验收与恢复手册`](docs/verification/agent-task-sync-v0.2.0-release-acceptance.md) 完成干净目录安装、诊断、跨设备接续、升级、回滚和人工结果回传。
+
 实体 Windows 的安装、跨设备恢复、Hook 冒烟测试和结果回传步骤见 [`docs/verification/agent-task-sync-windows-handoff-v0.1.md`](docs/verification/agent-task-sync-windows-handoff-v0.1.md)。
 
 ## 环境变量

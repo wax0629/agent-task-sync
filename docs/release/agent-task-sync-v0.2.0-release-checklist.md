@@ -7,7 +7,7 @@
 - [x] `npm run check:release -- --version 0.2.0` 通过。
 - [x] `npm test`、`npm run typecheck` 和 `npm run test:release` 通过。
 - [x] macOS/Linux/Windows × Node 20/22 CI 通过。
-- [ ] GitHub Release 上传 `.tgz` 和 `SHA256SUMS.txt`（合并后推送 `v0.2.0` tag 触发）。
+- [x] GitHub Release 上传 `.tgz` 和 `SHA256SUMS.txt`（[v0.2.0 Release](https://github.com/wax0629/agent-task-sync/releases/tag/v0.2.0)，workflow run `34102187430`）。
 - [x] Release notes 写明安装、升级、限制、验收证据和回滚。
 
 ## 不在本次发布门内
