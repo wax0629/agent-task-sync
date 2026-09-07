@@ -380,11 +380,17 @@ export class ApplicationService implements TaskSyncService {
     }
     const payload: HandoffCreatedPayload = {
       handoffId: input.handoffId,
+      goal: input.goal ?? current.goal,
+      constraints: input.constraints,
       completedWork: input.completedWork,
       incompleteWork: input.incompleteWork,
+      blockedWork: input.blockedWork,
       keyDecisions: input.keyDecisions,
       knownErrors: input.knownErrors,
       nextStep: input.nextStep,
+      criticalContext: input.criticalContext,
+      filesRead: input.filesRead,
+      filesChanged: input.filesChanged,
       relevantFiles: input.relevantFiles,
       testSummary: input.testSummary,
       targetAgent: input.targetAgent

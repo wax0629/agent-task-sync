@@ -32,14 +32,18 @@ function eventSummary(event: TaskEvent): string {
     reason?: string;
     currentFocus?: string;
     nextAction?: string | null;
-    filesChanged?: string[];
     commit?: string;
     uncommittedChanges?: string[];
     verification?: Array<{ command: string; status: string }>;
     handoffId?: string;
+    constraints?: string[];
     completedWork?: string[];
     incompleteWork?: string[];
+    blockedWork?: string[];
     nextStep?: string | null;
+    criticalContext?: string[];
+    filesRead?: string[];
+    filesChanged?: string[];
     relevantFiles?: string[];
     testSummary?: string;
     targetAgent?: string;
@@ -62,7 +66,9 @@ function eventSummary(event: TaskEvent): string {
       payload.targetAgent ? `目标 Agent：${payload.targetAgent}` : undefined,
       payload.completedWork?.length ? `已完成：${payload.completedWork.join(", ")}` : undefined,
       payload.incompleteWork?.length ? `未完成：${payload.incompleteWork.join(", ")}` : undefined,
+      payload.blockedWork?.length ? `阻塞：${payload.blockedWork.join(", ")}` : undefined,
       payload.nextStep ? `下一步：${payload.nextStep}` : undefined,
+      payload.filesChanged?.length ? `修改文件：${payload.filesChanged.join(", ")}` : undefined,
       payload.relevantFiles?.length ? `文件：${payload.relevantFiles.join(", ")}` : undefined,
       payload.testSummary ? `测试：${payload.testSummary}` : undefined
     ].filter((value): value is string => Boolean(value)).map(line).join("；");
@@ -116,6 +122,10 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
         state.handoff.acceptedAt ? `接受时间：${state.handoff.acceptedAt}` : "接受状态：待接受",
         state.handoff.acceptedBy ? `接受者：${line(state.handoff.acceptedBy.agentId)} / ${line(state.handoff.acceptedBy.deviceId)}` : "",
         state.handoff.targetAgent ? `目标 Agent：${line(state.handoff.targetAgent)}` : "",
+        `交接目标：${text(state.handoff.goal ?? state.goal)}`,
+        "",
+        "约束：",
+        bullets(state.handoff.constraints ?? []),
         "",
         "已完成：",
         bullets(state.handoff.completedWork),
@@ -123,7 +133,13 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
         "未完成：",
         bullets(state.handoff.incompleteWork),
         "",
+        "阻塞：",
+        bullets(state.handoff.blockedWork ?? []),
+        "",
         `交接下一步：${text(state.handoff.nextStep, "未指定")}`,
+        state.handoff.criticalContext?.length ? `关键上下文：${state.handoff.criticalContext.map(line).join("；")}` : "",
+        state.handoff.filesRead?.length ? `读取文件：${state.handoff.filesRead.map(line).join(", ")}` : "",
+        state.handoff.filesChanged?.length ? `修改文件：${state.handoff.filesChanged.map(line).join(", ")}` : "",
         state.handoff.testSummary ? `测试摘要：${line(state.handoff.testSummary)}` : ""
       ] : []),
       "",
@@ -168,33 +184,51 @@ export class MarkdownTaskRenderer implements MarkdownRenderer {
     const handoff = state.handoff ? [
       `# Handoff：${line(state.title)}`,
       "",
-      `交接 ID：${line(state.handoff.id)}`,
-      `创建时间：${state.handoff.createdAt}`,
-      state.handoff.acceptedAt ? `接受时间：${state.handoff.acceptedAt}` : "接受状态：待接受",
-      state.handoff.acceptedBy ? `接受者：${line(state.handoff.acceptedBy.agentId)} / ${line(state.handoff.acceptedBy.deviceId)}` : "",
-      state.handoff.targetAgent ? `目标 Agent：${line(state.handoff.targetAgent)}` : "",
+      "> 本文件是当前工程 checkpoint。详细需求、设计和任务状态以引用的项目文档为准。",
+      `> Handoff ID：${line(state.handoff.id)}`,
+      `> 创建时间：${state.handoff.createdAt}`,
+      state.handoff.acceptedAt ? `> 接受时间：${state.handoff.acceptedAt}` : "> 接受状态：待接受",
+      state.handoff.acceptedBy ? `> 接受者：${line(state.handoff.acceptedBy.agentId)} / ${line(state.handoff.acceptedBy.deviceId)}` : "",
+      state.handoff.targetAgent ? `> 目标 Agent：${line(state.handoff.targetAgent)}` : "",
       "",
-      "## 已完成",
+      "## Goal",
+      "",
+      text(state.handoff.goal ?? state.goal),
+      "",
+      "## Constraints",
+      "",
+      bullets(state.handoff.constraints ?? []),
+      "",
+      "## Progress",
+      "",
+      "### Done",
       "",
       bullets(state.handoff.completedWork),
       "",
-      "## 未完成",
+      "### In Progress",
       "",
       bullets(state.handoff.incompleteWork),
       "",
-      "## 下一步",
+      "### Blocked",
       "",
-      text(state.handoff.nextStep, "未指定"),
+      bullets(state.handoff.blockedWork ?? []),
       "",
-      "## 决策与错误",
+      "## Decisions",
       "",
-      state.handoff.keyDecisions.length ? state.handoff.keyDecisions.map((item) => `- ${line(item.decision)}${item.reason ? `：${line(item.reason)}` : ""}`).join("\n") : "- 未记录决策",
-      state.handoff.knownErrors.length ? state.handoff.knownErrors.map((item) => `- ${line(item.error)}${item.attempts ? `（尝试：${line(item.attempts)}）` : ""}`).join("\n") : "- 未记录错误",
+      state.handoff.keyDecisions.length ? state.handoff.keyDecisions.map((item) => `- **${line(item.decision)}**${item.reason ? `：${line(item.reason)}` : ""}`).join("\n") : "- 未记录",
       "",
-      "## 文件与验证",
+      "## Next Steps",
       "",
-      bullets(state.handoff.relevantFiles),
-      state.handoff.testSummary ? `\n测试摘要：${line(state.handoff.testSummary)}` : "",
+      state.handoff.nextStep ? `1. ${line(state.handoff.nextStep)}` : "1. None",
+      "",
+      "## Context",
+      "",
+      state.handoff.criticalContext?.length ? state.handoff.criticalContext.map((item) => `- ${line(item)}`).join("\n") : "- None",
+      state.handoff.filesRead?.length ? `- 读取文件：${state.handoff.filesRead.map(line).join(", ")}` : "- 读取文件：None",
+      state.handoff.filesChanged?.length ? `- 修改文件：${state.handoff.filesChanged.map(line).join(", ")}` : "- 修改文件：None",
+      state.handoff.relevantFiles.length ? `- 相关文件：${state.handoff.relevantFiles.map(line).join(", ")}` : "- 相关文件：None",
+      state.handoff.knownErrors.length ? state.handoff.knownErrors.map((item) => `- 已知错误：${line(item.error)}${item.attempts ? `（尝试：${line(item.attempts)}）` : ""}`).join("\n") : "- 已知错误：None",
+      state.handoff.testSummary ? `- 验证：${line(state.handoff.testSummary)}` : "- 验证：None",
       ""
     ].filter((part, index, array) => !(part === "" && array[index - 1] === "")).join("\n") : undefined;
 

@@ -83,6 +83,11 @@ test("complete checkpoint and handoff fixture rebuilds all four projections with
   assert.equal(firstState?.references[0]?.commit, "abc1234");
   assert.equal(firstState?.verification[0]?.status, "passed");
   assert.equal(firstState?.handoff?.id, "handoff-fixture-1");
+  assert.equal(firstState?.handoff?.goal, "Restore every continuation field");
+  assert.deepEqual(firstState?.handoff?.constraints, ["Keep events as the source of truth"]);
+  assert.deepEqual(firstState?.handoff?.blockedWork, ["Remote branch may be ahead"]);
+  assert.deepEqual(firstState?.handoff?.filesRead, ["README.md"]);
+  assert.deepEqual(firstState?.handoff?.filesChanged, ["packages/domain/src/reducer.ts"]);
   assert.equal(firstState?.handoff?.acceptedBy?.deviceId, "windows");
 
   const filesBefore = await Promise.all([
@@ -102,6 +107,9 @@ test("complete checkpoint and handoff fixture rebuilds all four projections with
   assert.match(filesBefore[3], /接受交接 handoff-fixture-1/);
   assert.match(filesBefore[4], /Events remain the source of truth/);
   assert.match(filesBefore[4], /接受时间：2026-09-03T04:00:00.000Z/);
+  assert.match(filesBefore[4], /## Goal/);
+  assert.match(filesBefore[4], /### Blocked/);
+  assert.match(filesBefore[4], /读取文件：README\.md/);
 
   const eventsBefore = await runtime.events.readTaskEvents("checkpoint-handoff-task");
   await unlink(join(root, "progress.md"));

@@ -4,8 +4,9 @@
   "hooks": {
     "SessionStart": "task-sync-adapter-codex session_start",
     "PreCompact": "task-sync-adapter-codex pre_compact",
-    "Stop": "task-sync-adapter-codex stop"
+    "Stop": "task-sync-adapter-codex stop",
+    "Handoff": "task-sync-adapter-codex handoff"
   },
-  "input": "JSON on stdin: { cwd, taskId?, checkpointInputFile?, confirmed? }",
+  "input": "JSON on stdin: { cwd, taskId?, checkpointInputFile?, handoffInputFile?, confirmed? }",
   "confirmation": "checkpoint and handoff writes require an explicit confirmed=true input"
 }
