@@ -10,8 +10,8 @@ const readmePath = join(root, "README.md");
 const legacyPath = join(root, "adapters", "SKILL.md");
 
 test("the repository exposes one canonical Agent Task Sync Skill", async () => {
-  const skill = await readFile(skillPath, "utf8");
-  const readme = await readFile(readmePath, "utf8");
+  const skill = (await readFile(skillPath, "utf8")).replace(/\r\n/g, "\n");
+  const readme = (await readFile(readmePath, "utf8")).replace(/\r\n/g, "\n");
 
   assert.match(skill, /^---\nname: agent-task-sync\ndescription: .+\nmetadata:\n/m);
   assert.match(skill, /task-sync status --json/);
@@ -25,7 +25,7 @@ test("the repository exposes one canonical Agent Task Sync Skill", async () => {
 });
 
 test("the canonical Skill keeps read and write boundaries distinct", async () => {
-  const skill = await readFile(skillPath, "utf8");
+  const skill = (await readFile(skillPath, "utf8")).replace(/\r\n/g, "\n");
   const readSection = skill.slice(skill.indexOf("## Session start"), skill.indexOf("## Checkpoint and handoff"));
   const writeSection = skill.slice(skill.indexOf("## Checkpoint and handoff"), skill.indexOf("## Sync and conflicts"));
 
