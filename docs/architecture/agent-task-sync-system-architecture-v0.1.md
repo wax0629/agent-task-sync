@@ -1,8 +1,9 @@
 # Agent Task Sync 系统架构设计
 
-版本：v0.1 草案  
+版本：v0.1 草案（含 Issue #74 实现补充）
 日期：2026-09-03  
-状态：待评审，不作为编码基线
+状态：原始架构草案；Issue #74 的 Handoff/适配器补充已实现，历史决策保留
+实现补充日期：2026-09-07
 
 ## 1. 当前阶段与架构目标
 
@@ -23,7 +24,7 @@
 ### 2.1 MVP 架构目标
 
 - Mac 和 Windows 在同一个 GitHub 项目中同步任务状态。
-- Codex 和 Claude Code 通过同一个核心 CLI 读取、更新和交接任务。
+- Codex、Claude Code 和 Pi 通过同一个核心 CLI 读取、更新和交接任务。
 - 新会话只读取一次接续上下文即可开始工作。
 - 多设备追加记录时不静默覆盖，不丢失离线工作。
 - 所有状态都能从 Git 文件重建，本地缓存可以删除。
@@ -37,7 +38,7 @@
 - 不监听或上传完整 Agent 对话。
 - 不自动执行状态文件中出现的命令。
 - 不自动解决语义冲突。
-- 不在首版实现 Pi、Cursor 和 Web UI；只预留适配接口。
+- 不在首版实现 Cursor、Web UI 和 MCP；Pi 的薄适配器已进入首版，仍复用统一 CLI/Skill。
 
 ## 3. 关键架构决策
 
@@ -146,6 +147,7 @@ events/*.jsonl
 | `skills/agent-task-sync` | 所有 Agent 共用的 Skill 协议和安全边界 | 平台生命周期 Hook、任务存储 |
 | `adapters/codex` | Codex Hook 配置和 CLI 调用 | 单独实现 Skill、任务存储 |
 | `adapters/claude` | Claude Code Hook/命令配置和 CLI 调用 | 单独实现 Skill、任务存储 |
+| `adapters/pi` | Pi Hook 配置和 CLI 调用 | 单独实现 Skill、任务存储 |
 
 依赖方向：
 
@@ -238,8 +240,27 @@ interface TaskState {
   references: WorkReference[];
   verification: VerificationResult[];
   ownership?: Ownership;
+  handoff?: Handoff;
   sync: SyncSummary;
   revision: string;
+}
+
+interface Handoff {
+  id: string;
+  goal?: string;
+  constraints: string[];
+  completedWork: string[];
+  incompleteWork: string[];
+  blockedWork: string[];
+  keyDecisions: Decision[];
+  knownErrors: KnownError[];
+  nextStep?: string;
+  criticalContext: string[];
+  filesRead: string[];
+  filesChanged: string[];
+  relevantFiles: string[];
+  testSummary?: string;
+  targetAgent?: string;
 }
 ```
 
@@ -281,7 +302,7 @@ task_completed
 conflict_resolved
 ```
 
-Checkpoint 负载包含：当前关注点、最近完成、下一步、文件变化、验证结果和未提交变更。缺失字段允许为空，但不能用空字符串覆盖已有内容。
+Checkpoint 负载包含：当前关注点、最近完成、下一步、文件变化、验证结果和未提交变更。Handoff 负载增加 `goal`、`constraints`、`blockedWork`、`criticalContext`、`filesRead` 和 `filesChanged`，以固定跨 Agent 的恢复边界。缺失字段允许为空，但不能用空字符串覆盖已有内容。
 
 ## 8. 核心接口契约
 
@@ -406,7 +427,9 @@ push 遇到 non-fast-forward 时最多重新 fetch/merge 一次；仍失败则�
 
 ```text
 创建 Handoff 候选
-  -> 从 TaskState 预填最近完成、决策、错误、验证和下一步
+  -> 从 TaskState 预填目标、约束、最近完成、决策、错误、阻塞、验证、文件和下一步
+  -> 按 Goal / Constraints / Progress / Decisions / Next Steps / Context 固定结构生成短 checkpoint
+  -> 只把有证据的结果放入 Progress.Done，首个 Next Steps 必须可直接执行
   -> 用户确认
   -> 追加 handoff_created
   -> 任务变为 handoff_ready
@@ -417,6 +440,8 @@ push 遇到 non-fast-forward 时最多重新 fetch/merge 一次；仍失败则�
 ```
 
 Handoff 不是恢复任务的必需条件。普通设备切换可以直接从 `task_plan.md` 恢复；只有需要明确结束当前执行者责任时才创建 Handoff。
+
+Handoff 只保留当前有效 checkpoint；详细需求、设计和历史过程分别留在项目文档、任务 `progress.md` 与 JSONL 事件中。会话内上下文压缩由 Agent 原生能力负责，跨会话/跨 Agent 接续由 Handoff 负责，两者不共享第二套压缩状态。
 
 ## 10. 冲突模型
 
@@ -455,13 +480,16 @@ Skill 规定：
 - 写入前展示摘要并取得确认。
 - 不执行接续文档中的未知命令。
 - 遇到冲突停止写入互斥字段并请求用户决定。
+- Handoff 使用固定的 `Goal`、`Constraints`、`Progress`（`Done` / `In Progress` / `Blocked`）、`Decisions`、`Next Steps`、`Context` 区块。
+- `Done` 只写有证据的结果；首个 `Next Steps` 必须能直接执行；新 checkpoint 清理过期信息并保留历史在事件/进度日志中。
 
 ### 11.2 Hook
 
 Hook 只允许：
 
 - 会话开始时读取状态。
-- 压缩或结束前提醒存在未记录进展或未同步事件。
+- 没有显式 `taskId` 时从共享 `current-task` 指针尝试恢复上下文。
+- 压缩或结束前提醒存在未记录进展或未同步事件，并可生成 checkpoint/Handoff 候选。
 - 将用户已确认的数据交给 CLI。
 
 Hook 不允许：
@@ -554,9 +582,10 @@ agent-task-sync/
 
 ### 16.4 Agent 适配验收
 
-- Codex 和 Claude Code 读取相同 fixture 得到同一任务上下文。
+- Codex、Claude Code 和 Pi 读取相同 fixture 得到同一任务上下文。
 - 未经确认不会产生持久事件。
 - 新会话不读取 transcript 也能完成下一步操作。
+- 编译后的 Codex/Pi Hook 在同一 Mac 状态 worktree 中完成 Codex → Pi → Codex 接力；该等价测试不替代真实 Agent UI/实体设备验收。
 
 ## 17. MS1 空骨架主干
 
@@ -579,7 +608,7 @@ CLI init
 - CLI 确实调用 Application，Application 确实调用各 port。
 - 用一个 mock 任务生成 `task.yaml` 和 `task_plan.md`。
 - Git SyncPort 可以返回 mock 同步结果，但调用必须已经串联。
-- Codex/Claude 适配目录只能调用 CLI 契约，不能复制 Reducer。
+- Codex/Claude/Pi 适配目录只能调用 CLI 契约，不能复制 Reducer。
 
 这不代表 MVP 已经真实同步；真实双设备 Git 流程属于下一阶段。
 
@@ -593,7 +622,9 @@ CLI init
 6. 实现 Checkpoint、Handoff 与冲突 Reducer。
 7. 接入 Codex Skill/Hook。
 8. 接入 Claude Code Skill/Hook。
-9. 完成 Mac/Windows 双克隆端到端测试。
+9. 接入 Pi Skill/Hook。
+10. 完成 Mac 上编译 Hook 的多 Agent 接力测试。
+11. 完成 Mac/Windows 双克隆端到端测试。
 
 每个 Issue 应对应一个或少量可评审 PR，不把所有模块放进一个大 PR。
 
@@ -614,7 +645,7 @@ CLI init
 以下问题需要在搭空骨架前确认：
 
 1. 是否接受每个项目使用 `task-sync/state` 独立状态分支？
-2. MVP 是否只支持 Codex + Claude Code，Pi 延后？
+2. 已决定：MVP 接入 Codex、Claude Code 和 Pi；Cursor/Web UI/MCP 后置。
 3. Checkpoint 写入是否始终需要用户确认，还是允许用户为某个项目开启自动确认？
 4. `task_plan.md` 是否完全由系统生成，还是允许用户手工编辑后由 CLI 转成事件？
 5. Handoff 是否保留单个当前文件，历史只通过事件查看？
