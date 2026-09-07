@@ -22,16 +22,16 @@
 
 - 事件事实源、Domain Reducer、文件投影和 Markdown 接续文档。
 - 任务创建、认领、更新、阻塞、完成、决策、问题、错误和验证记录。
-- checkpoint、handoff、handoff 接受、只读完整性检查和恢复建议。
+- checkpoint、handoff、handoff 接受、只读完整性检查和恢复建议；Handoff 已固定为 Goal/Constraints/Progress/Decisions/Next Steps/Context checkpoint。
 - Git 状态分支、独立状态 worktree、pull/push/sync、幂等和冲突保留。
 - `status`、`task list` 筛选、`context`、`conflicts`、`rebuild` 等 CLI 入口。
 - Codex、Claude Code、Pi 的薄适配器和统一 CLI invocation 合约。
-- 单元测试、契约测试和双 clone 跨设备回归测试。
+- 单元测试、契约测试、双 clone 跨设备回归测试，以及编译 Codex → Pi → Codex 的同 Mac 等价接续测试。
 
 ### 尚未证明
 
 - 新用户在一台真实设备上完成首次安装和初始化的顺畅程度。
-- Mac + Codex 创建后，Windows + Claude Code/Pi 是否能按文档无歧义恢复。
+- Mac + Codex 创建后，Windows + Claude Code/Pi 是否能在实体设备按文档无歧义恢复。
 - Hook 在真实 Agent 生命周期中的输入字段、环境变量和错误返回是否完全符合平台约定。
 - 统一 Skill 是否能让不同 Agent 按同一协议工作，而不依赖人工记忆命令。
 
@@ -41,17 +41,17 @@
 
 任务可以被创建、更新、记录上下文、生成接续文档并从事件重建；写入需要显式确认，事实来源与投影职责分离。
 
-### 门槛 B：跨设备接续可复现（当前执行）
+### 门槛 B：跨设备接续可复现（等价环境通过，实体待补）
 
-完成一次真实或等价的双设备流程：设备 A 的 Agent 创建任务并写入 checkpoint/handoff，状态同步到 GitHub；设备 B 执行 sync 后可以读取目标、完成项、下一步、验证和问题，并接受 handoff 后继续写入。
+等价环境已完成设备 A/B 的双 clone 流程；同一 Mac 的 Codex → Pi → Codex 编译 Hook 接力也已通过。实体 Windows 流程仍需设备 A 的 Agent 创建任务并写入 checkpoint/handoff，状态同步到 GitHub；设备 B 执行 sync 后读取目标、完成项、下一步、验证和问题，接受 handoff 后继续写入。
 
 验收证据：
 
-- 一份可复制的 Mac -> GitHub -> Windows 操作记录。
+- 一份可复制的 Mac -> GitHub -> Windows 操作记录，以及同 Mac Codex -> Pi -> Codex Hook 记录。
 - 无网络、远程领先、非快进推送和语义冲突的处理结果。
 - 失败时本地事件保留，恢复后可以重试。
 
-### 门槛 C：Agent 接入可安装、可解释（下一批）
+### 门槛 C：Agent 接入可安装、可解释（代码通过，实机待补）
 
 用户只需安装 CLI、复制统一 Skill 并按平台启用薄适配器，就能让 Codex、Claude Code 和 Pi 读取同一份上下文。适配器只做生命周期转换，不复制状态逻辑。
 
@@ -67,16 +67,16 @@
 
 ## 4. 当前执行批次
 
-本批次围绕“跨设备接续从代码闭环变成可使用闭环”，拆成以下独立工作：
+本批次围绕“跨设备接续从代码闭环变成可使用闭环”，已完成代码和等价验证；剩余工作集中在真实 Agent/设备验收：
 
-1. **双设备接续验收与操作记录**
+1. **双设备接续验收与操作记录（等价已通过）**
    - 用真实 GitHub remote 或等价的双 clone 流程验证 Mac/Codex -> Windows/Claude/Pi。
    - 将成功、断网、远程领先、冲突和重试路径写成可复制记录。
-2. **统一 Skill 与首次安装入口**
+2. **统一 Skill 与首次安装入口（已通过代码审查）**
    - 固定 Skill 的 canonical 路径和复制方式。
    - 补 CLI、Codex、Claude Code、Pi 的最小安装步骤和确认规则。
    - 不新增第二套任务协议，不保存完整对话。
-3. **Hook 运行时契约加固**
+3. **Hook 运行时契约加固（已通过代码审查）**
    - 明确 stdin 输入、cwd、taskId、输入文件和确认字段。
    - 对非法输入和未知 Hook 返回可解释、非阻断结果。
    - 保持 `task-sync` CLI 为唯一写入入口。
@@ -84,9 +84,9 @@
 ## 5. 执行顺序
 
 1. 建立本计划和当前批次父 Issue/子 Issue。
-2. 先完成双设备验收记录；发现缺陷时另开最小 Bug/实现 Issue，不混入文档 PR。
-3. 实现统一 Skill 和安装入口，独立 PR 合并并复跑全量测试。
-4. 实现 Hook 契约加固，独立 PR 合并并复跑全量测试。
+2. 完成统一 Skill、Hook 契约和同 Mac Codex/Pi 等价链路；代码 PR #76/#77 已合并。
+3. 更新设计与验收文档，记录文章原则、证据和边界；文档 PR 单独评审合并。
+4. 在真实 Codex/Pi 生命周期和实体 Windows 上复现同一流程；发现缺陷时另开最小 Bug/实现 Issue。
 5. 汇总验收结果，判断是否进入下一能力门槛；未达到时优先修复，不扩展功能。
 
 每个代码改动都必须能对应一个开放 Issue；PR 合并前检查实际 diff、测试、冲突和安全边界。计划只记录推进状态，不替代 Issue 中的详细验收标准。
@@ -114,3 +114,4 @@
 | 日期 | 变化 | 原因 |
 |---|---|---|
 | 2026-09-03 | 建立按能力门槛推进的执行计划 | 核心代码闭环已完成，需要转向真实可用性验证 |
+| 2026-09-07 | 完成 Issue #74 的结构化 Handoff 与同 Mac Codex/Pi 编译 Hook 等价闭环，合并 PR #77 | 将会话内压缩与跨会话 Handoff 分层，固定 checkpoint 字段并验证共享 current-task/Agent 身份 |

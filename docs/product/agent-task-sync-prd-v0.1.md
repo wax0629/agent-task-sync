@@ -2,7 +2,7 @@
 
 版本：v0.1  
 日期：2026-09-02  
-状态：初版，待评审
+状态：初版；Issue #74 的 Handoff/多 Agent 接续补充已实现，原始范围保留
 
 ## 1. 产品概述
 
@@ -93,7 +93,7 @@ Agent 接入层
 ### 3.1 MVP 产品目标
 
 - 在 Mac 和 Windows 之间同步同一个任务的结构化状态
-- 支持至少 Codex 和 Claude Code 两种 Agent 接入
+- 支持 Codex、Claude Code 和 Pi 的统一 Skill/薄适配器接入
 - 支持 Agent 建议 checkpoint 和 handoff，并在用户确认后写入
 - 支持多个 Agent 通过事件日志协作，避免静默覆盖
 - 新会话可以在一次状态读取后恢复工作
@@ -262,10 +262,18 @@ Codex / MacBook Pro / 当前会话，未同步事件：2
 #### P0
 
 - Agent 可以创建 handoff
-- Handoff 必须包含：已完成工作、当前阶段、关键决策、错误、阻塞、下一步、相关文件和测试结果
+- Handoff 必须按固定 checkpoint 结构包含：Goal、Constraints、Progress（Done / In Progress / Blocked）、Decisions、Next Steps 和 Context；其中 Context 至少能引用关键上下文、读过/改过的文件和验证摘要
+- `Done` 只允许写入有证据的结果；`Next Steps` 第一项必须是下一位 Agent 可以直接执行的动作
+- 新 Handoff 更新当前 checkpoint，清理已完成或过期信息；历史过程保留在事件和任务级 `progress.md`，不把 Handoff 变成聊天 transcript
 - 创建 handoff 后任务进入 `handoff_ready`
 - 下一位 Agent 接受后生成认领事件
 - 新会话读取一次 handoff 后可以开始工作
+
+#### Issue #74 实现补充
+
+本轮参考《[从 Pi 压缩机制到 Handoff 技能实战](https://mp.weixin.qq.com/s/BzR-t-_osJ76XKqdU47xKw)》的分层原则：会话内上下文压缩由 Agent 原生机制负责，跨会话/跨 Agent 由 Handoff 负责。产品不实现第二套 token 压缩算法，而是让短 Handoff 携带可重建的目标、约束、证据化进展、决策、阻塞、文件和下一步。
+
+缺少阶段不阻止任务接续；阶段、当前关注点和下一步仍是可选字段。Handoff 的固定结构用于降低恢复时的认知负担，不改变事件为事实来源、Markdown 为投影的边界。
 
 #### P1
 
@@ -309,13 +317,13 @@ Agent 接入分为三种职责：
 - 提供通用 `SKILL.md`
 - 提供 Codex 基础 Hook
 - 提供 Claude Code 基础 Hook
+- 提供 Pi 基础 Hook/Extension
 - Agent 启动或用户发言时注入当前任务状态
 - 工具调用后提醒或自动记录 checkpoint
 - 上下文压缩前写入恢复信息
 
 #### P1
 
-- 提供 Pi extension
 - 提供 MCP Server
 - 提供 `/status`、`/checkpoint`、`/handoff` 等命令
 - 支持按项目配置启用或禁用自动注入
@@ -323,7 +331,7 @@ Agent 接入分为三种职责：
 #### 接入策略
 
 - 优先使用 Agent Skills 标准目录和统一 Skill 内容
-- Codex、Claude Code、Pi、Cursor 等平台分别维护薄适配器
+- Codex、Claude Code、Pi、Cursor 等平台分别维护薄适配器；适配器只转换生命周期和输入输出，不复制任务状态逻辑
 - 适配器只负责生命周期事件转换、环境变量和输出格式
 - 所有适配器调用 `task-sync ... --json` 或共享核心库
 - 支持 MCP 的 Agent 使用同一个 MCP Server，不重复实现业务工具
@@ -488,7 +496,7 @@ MVP 不引入数据库依赖，推荐每个项目使用以下文件：
 - Git 同步
 - Markdown 任务接续文档
 - `status`、`claim`、`checkpoint`、`handoff`、`sync` 命令
-- Codex 和 Claude Code 基础适配
+- Codex、Claude Code 和 Pi 基础适配
 - 统一 Skill、核心 CLI 和平台适配器分层
 - Mac、Windows 基础兼容
 - 单元测试、跨平台同步测试和最小冲突测试
@@ -546,6 +554,7 @@ MVP 不引入数据库依赖，推荐每个项目使用以下文件：
 ### MVP 验收指标
 
 - Mac 上 Codex 创建的任务可在 Windows 上由 Claude Code 恢复
+- 同一 Mac 上 Codex 写入的任务可由 Pi 通过共享 `current-task` 恢复、接受 Handoff 并回写 checkpoint，再由 Codex 读回
 - 新 Agent 在一次 `status` 或 Hook 注入后，能获得目标、当前阶段、下一步和阻塞项
 - 两台设备并发操作时，无静默丢失事件
 - 同步失败后重试不丢数据
@@ -586,7 +595,7 @@ MVP 不引入数据库依赖，推荐每个项目使用以下文件：
 | Git 冲突复杂 | 用户不敢使用同步 | 事件文件隔离，冲突显式化 |
 | Agent 不主动记录状态 | 看板失真 | Hook 自动 checkpoint，Stop 前提示 |
 | Skill 兼容性不一致 | 不同 Agent 行为不同 | 核心 CLI 统一，适配器薄化 |
-| 事件过多导致上下文膨胀 | Agent 读取成本高 | 快照、摘要和固定字段 |
+| 事件过多导致上下文膨胀 | Agent 读取成本高 | 短 Handoff checkpoint、快照和摘要；历史留在事件/进度日志 |
 | 远程文本 Prompt Injection | 安全事故 | 数据标记、hash、长度限制、不执行命令 |
 | 范围膨胀成通用 PM 软件 | MVP 失焦 | 明确 Agent 执行和 handoff 为核心 |
 
@@ -625,6 +634,7 @@ Agent 判断用户开始了新项目
 3. 实现 Git 同步和幂等事件合并
 4. 实现 checkpoint、handoff 和冲突检测
 5. 接入 Codex Hook
-6. 接入 Claude Code Hook
-7. 完成 Mac/Windows 端到端测试
-8. 再决定是否需要 Web UI、MCP 和 Kaneo 适配器
+6. 接入 Claude Code Hook 和 Pi Hook
+7. 完成同一 Mac 的 Codex ↔ Pi 接续闭环
+8. 完成 Mac/Windows 端到端测试
+9. 再决定是否需要 Web UI、MCP 和 Kaneo 适配器

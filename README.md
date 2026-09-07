@@ -124,6 +124,8 @@ task-sync sync
 
 `handoff create` 的输出会包含 handoff ID。也可以用 `task-sync status --json` 查看当前任务和 ID。
 
+Handoff 是跨会话/跨 Agent 的短 checkpoint，不是聊天记录。当前 `handoff.md` 始终按固定顺序生成：`Goal`、`Constraints`、`Progress`（`Done` / `In Progress` / `Blocked`）、`Decisions`、`Next Steps`、`Context`。创建下一份交接时只保留当前有效摘要；历史事件和任务级 `progress.md` 不会被覆盖。`Done` 只接受有证据的结果，`Next Steps` 的第一项应能直接执行。
+
 ### 设备 B：同步并继续
 
 ```bash
@@ -237,7 +239,7 @@ Git 仓库默认使用独立状态 worktree：
 task-sync checkpoint --input checkpoint.json --yes --json
 ```
 
-`handoff.json` 使用 `completedWork`、`incompleteWork`、`keyDecisions`、`knownErrors`、`nextStep`、`relevantFiles`、`testSummary` 和 `targetAgent` 字段：
+`handoff.json` 可以使用 `goal`、`constraints`、`completedWork`、`incompleteWork`、`blockedWork`、`keyDecisions`、`knownErrors`、`nextStep`、`criticalContext`、`filesRead`、`filesChanged`、`relevantFiles`、`testSummary` 和 `targetAgent` 字段。缺少 `goal` 时 CLI 会从任务目标预填；其它缺失字段显示为 `None`/未记录，不会臆造完成项：
 
 ```bash
 task-sync handoff create --task task-1 --input handoff.json --yes --json
@@ -262,13 +264,15 @@ task-sync handoff create --task task-1 --input handoff.json --yes --json
 
 | 平台 | 配置骨架 | 会调用 |
 | --- | --- | --- |
-| Codex | `adapters/codex/codex-hooks.json` | `task-sync-adapter-codex session_start/pre_compact/stop` |
+| Codex | `adapters/codex/codex-hooks.json` | `task-sync-adapter-codex session_start/pre_compact/stop/handoff` |
 | Claude Code | `adapters/claude-code/claude-hooks.json` | `task-sync-adapter-claude session_start/pre_compact/stop` |
 | Pi | `adapters/pi/pi-hooks.json` | `task-sync-adapter-pi session_start/pre_compact/stop/handoff` |
 
 会话开始读取 `status --json`，有明确任务时再读取 `context --format json`。停止或压缩前只能生成 checkpoint/handoff 候选；只有输入包含 `confirmed=true`（最终转成 CLI 的 `--yes`）时才写事件。Hook 失败会返回 warning，不应阻断 Agent 会话。
 
 所有适配器共用同一份 Hook 输入/输出契约。stdin 可以传入 JSON 对象 `{ "cwd": string, "taskId"?: string, "checkpointInputFile"?: string, "handoffInputFile"?: string, "confirmed"?: boolean, "environment"?: object }`；非空输入必须包含非空 `cwd`，可选字段类型不正确时返回 warning。空 stdin 使用当前工作目录。未知 Hook、非法 JSON 和 CLI 失败都输出可解析的 `{ "continue": true, ... }` JSON，不抛出未处理异常，也不阻断 Agent 会话。未知或未确认的写入不会调用 CLI。
+
+Codex 和 Pi 可以在同一台 Mac 上复用 `.task-sync` 状态 worktree：`task use` 写入 `current-task` 后，后续 SessionStart/PreCompact 可以省略 `taskId`；适配器会注入默认 `TASK_SYNC_AGENT_ID`，事件仍能区分 `codex` 和 `pi`。编译 Hook 的等价链路见 [`apps/cli/tests/dual-device.e2e.test.ts`](apps/cli/tests/dual-device.e2e.test.ts)；它证明协议和进程边界，不替代真实 Agent UI 验收。
 
 Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可以按平台规则复制到命令目录。其他 Agent 可以复用同一 CLI/JSON 合约，实现自己的薄适配器，不需要重新实现状态逻辑。
 

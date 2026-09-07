@@ -12,3 +12,5 @@ npm link --workspace=@agent-task-sync/adapter-pi
 Use `pi-hooks.json` as the configuration template. The executable reads one JSON object from stdin and writes one JSON result to stdout. It supports `session_start`, `pre_compact`, `stop`, and `handoff` dispatches.
 
 Session start and compaction only read context. Stop and handoff return a candidate without writing until the input contains `confirmed: true`; CLI failures return `continue: true` with a warning so a Pi session is not blocked.
+
+Pi can omit `taskId` on read hooks after `task-sync task use` has written the shared `current-task` pointer. The same state worktree can therefore be reused by Codex and Pi on one Mac while event writers remain distinguishable.
