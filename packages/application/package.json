@@ -1,10 +1,10 @@
 {
   "name": "@agent-task-sync/application",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "private": true,
   "dependencies": {
-    "@agent-task-sync/domain": "0.1.0"
+    "@agent-task-sync/domain": "0.2.0"
   },
   "exports": {
     ".": {

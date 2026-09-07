@@ -1,6 +1,6 @@
 # Agent Task Sync 协议兼容、升级回滚与人工验收
 
-版本：v0.1
+版本：v0.2.0
 日期：2026-09-03
 状态：协议 v1 已实现；真实设备、真实 Agent 生命周期和真实用户试用待填写
 
@@ -26,11 +26,11 @@
 
 ### 2.2 组件兼容矩阵
 
-当前 workspace 中 CLI、Skill 和三个适配器均为 `0.1.0` 发布线。Skill 没有单独的 npm 版本字段，使用仓库提交和发布说明与 CLI/适配器一起配套升级。
+当前 workspace 中 CLI、Skill 和三个适配器均为 `0.2.0` 发布线。Skill 没有单独的 npm 版本字段，使用仓库提交和发布说明与 CLI/适配器一起配套升级。
 
 | 组合 | 是否支持 | 说明 |
 |---|---|---|
-| CLI `0.1.0` + Event/State/Project v1 | 支持 | 当前唯一完整支持组合 |
+| CLI `0.2.0` + Event/State/Project v1 | 支持 | 当前唯一完整支持组合 |
 | Codex、Claude Code、Pi 适配器混用同一 v1 状态 | 支持 | 适配器只转换生命周期，状态读写仍由同一个 CLI 完成 |
 | 当前 CLI + canonical Skill `skills/agent-task-sync/SKILL.md` | 支持 | Skill 只规定读取、确认、交接和安全边界，不保存状态 |
 | 旧/新适配器混用，但都调用同一 v1 CLI | 有条件支持 | 只要 stdin/stdout 合约未变；升级后必须运行 Hook 冒烟测试 |

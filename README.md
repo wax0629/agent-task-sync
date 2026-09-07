@@ -2,7 +2,7 @@
 
 轻量的多 Agent、多设备任务接续工具。它以 JSONL 事件作为事实来源，用项目级/任务级 `progress.md`、`task.yaml`、`task_plan.md` 和 `handoff.md` 生成可读、可重建的任务上下文，并通过 Git 状态分支在设备之间同步。
 
-当前版本是 CLI + 文件协议 + 薄适配器。它不会读取或保存完整聊天记录，也不会修改用户正在开发的代码分支。
+当前版本是 CLI + 文件协议 + 薄适配器。当前稳定发布线为 `v0.2.0`；它不会读取或保存完整聊天记录，也不会修改用户正在开发的代码分支。
 
 ## 前置条件
 
@@ -37,7 +37,29 @@ npm link --workspace=@agent-task-sync/adapter-pi
 
 ## 首次安装与诊断
 
-当前 CLI 尚未发布到 npm。首次使用时从仓库构建并链接本地命令：
+### 从 GitHub Release 安装（推荐）
+
+从 [v0.2.0 Release](https://github.com/wax0629/agent-task-sync/releases/tag/v0.2.0) 下载 `agent-task-sync-0.2.0.tgz` 和 `SHA256SUMS.txt`，先校验再全局安装：
+
+```bash
+# macOS / Linux
+shasum -a 256 -c SHA256SUMS.txt
+npm install --global ./agent-task-sync-0.2.0.tgz
+
+# Windows PowerShell：将输出的哈希与 SHA256SUMS.txt 中的值对照
+Get-FileHash .\agent-task-sync-0.2.0.tgz -Algorithm SHA256
+npm install --global .\agent-task-sync-0.2.0.tgz
+```
+
+安装后确认：
+
+```bash
+task-sync doctor --json
+```
+
+### 从源码构建
+
+如果需要开发最新提交或本地修改，可以从仓库构建并链接本地命令：
 
 ```bash
 git clone https://github.com/wax0629/agent-task-sync.git
@@ -69,7 +91,7 @@ task-sync status --json
 
 常见情况：
 
-- `task-sync: command not found`：回到 Agent Task Sync 源码目录重新执行 `npm run build` 和 `npm link --workspace=@agent-task-sync/cli`；也可以临时使用 `node /path/to/agent-task-sync/apps/cli/dist/main.js ...`。
+- `task-sync: command not found`：确认全局 npm bin 在 `PATH` 中；源码安装时回到 Agent Task Sync 目录重新执行 `npm run build` 和 `npm link --workspace=@agent-task-sync/cli`；也可以临时使用 `node /path/to/agent-task-sync/apps/cli/dist/main.js ...`。
 - 显示“项目尚未初始化”：在目标代码仓库执行 `task-sync init <project-id> "项目名称"`。
 - 显示 `mock/offline`：当前目录不是 Git 仓库，或设置了 `TASK_SYNC_STATE_DIR`；这种模式可本地读写，但不会跨设备推送状态。
 - 显示状态 worktree 路径冲突：先备份并移走该非 worktree 目录，再重新运行 `task-sync init`；CLI 不会自动删除目录。
@@ -278,6 +300,8 @@ Claude Code 的只读命令模板位于 `adapters/claude-code/commands/`，可�
 
 协议版本、组件兼容关系、升级/回滚步骤以及真实 Windows/Agent/用户验收模板见 [`docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md`](docs/verification/agent-task-sync-compatibility-manual-acceptance-v0.1.md)。
 
+版本、校验和、发布资产与回滚说明见 [`docs/release/agent-task-sync-v0.2.0-release-notes.md`](docs/release/agent-task-sync-v0.2.0-release-notes.md)；发布门禁见 [`docs/release/agent-task-sync-v0.2.0-release-checklist.md`](docs/release/agent-task-sync-v0.2.0-release-checklist.md)。
+
 实体 Windows 的安装、跨设备恢复、Hook 冒烟测试和结果回传步骤见 [`docs/verification/agent-task-sync-windows-handoff-v0.1.md`](docs/verification/agent-task-sync-windows-handoff-v0.1.md)。
 
 ## 环境变量
@@ -332,3 +356,14 @@ cd prototype
 npm install
 npm run dev
 ```
+
+## 维护发布资产
+
+维护者可以在干净工作区运行以下命令检查版本并生成本地发布资产：
+
+```bash
+npm run check:release -- --version 0.2.0
+npm run release:assets -- --version 0.2.0 --output-dir release
+```
+
+脚本会生成 `release/agent-task-sync-0.2.0.tgz` 和 `release/SHA256SUMS.txt`。GitHub Actions 在推送 `v*.*.*` tag 后执行同一检查、全量测试和 Release 上传流程；npm registry 发布仍需单独授权。

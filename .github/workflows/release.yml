@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: build and publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate release version
+        run: npm run check:release -- --version "${GITHUB_REF_NAME#v}"
+
+      - name: Run release validation
+        run: npm test && npm run typecheck
+
+      - name: Build release assets
+        run: npm run release:assets -- --version "${GITHUB_REF_NAME#v}" --output-dir release
+
+      - name: Verify release checksum
+        working-directory: release
+        run: sha256sum -c SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          release/*.tgz
+          release/SHA256SUMS.txt
+          --repo "${GITHUB_REPOSITORY}"
+          --title "Agent Task Sync ${GITHUB_REF_NAME}"
+          --notes-file docs/release/agent-task-sync-v0.2.0-release-notes.md
