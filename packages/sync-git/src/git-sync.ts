@@ -309,7 +309,11 @@ export class FileGitSyncPort implements GitSyncPort {
 
   private assertSuccess(result: GitCommandResult, operation: string, args: readonly string[]): void {
     if (result.exitCode !== 0) {
-      throw new GitSyncError(`Git ${operation} failed${result.stderr ? `: ${result.stderr.trim()}` : ""}`, operation, args, result.exitCode, result.stderr);
+      const detail = [result.stderr, result.stdout]
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join("\n");
+      throw new GitSyncError(`Git ${operation} failed${detail ? `: ${detail}` : ""}`, operation, args, result.exitCode, detail || undefined);
     }
   }
 }

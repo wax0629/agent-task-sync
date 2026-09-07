@@ -129,3 +129,16 @@ test("explicit hook environment can override the adapter identity", async () => 
   await adapter.stop({ cwd: "/repo", taskId: "task-1", checkpointInputFile: "/tmp/checkpoint.json", confirmed: true, environment: { TASK_SYNC_AGENT_ID: "codex-preview" } });
   assert.equal(executor.calls[0]?.env?.TASK_SYNC_AGENT_ID, "codex-preview");
 });
+
+test("TASK_SYNC_CLI_PATH overrides the default executable for bundled hooks", async () => {
+  const previous = process.env.TASK_SYNC_CLI_PATH;
+  process.env.TASK_SYNC_CLI_PATH = "/tmp/agent-task-sync-cli.mjs";
+  try {
+    const executor = new FakeExecutor(ok("# context"));
+    await createCliAgentAdapter({ name: "codex", executor }).sessionStart({ cwd: "/repo" });
+    assert.equal(executor.calls[0]?.executable, "/tmp/agent-task-sync-cli.mjs");
+  } finally {
+    if (previous === undefined) delete process.env.TASK_SYNC_CLI_PATH;
+    else process.env.TASK_SYNC_CLI_PATH = previous;
+  }
+});

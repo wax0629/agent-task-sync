@@ -17,6 +17,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test tests/cli.test.ts && tsx --test tests/doctor.test.ts && tsx --test tests/dual-device.e2e.test.ts && tsx --test tests/runtime.test.ts"
+    "test": "tsx tests/cli.test.ts && tsx tests/doctor.test.ts && tsx tests/dual-device.e2e.test.ts && tsx tests/runtime.test.ts"
   }
 }

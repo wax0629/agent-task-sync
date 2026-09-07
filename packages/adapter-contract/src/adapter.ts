@@ -35,7 +35,9 @@ function result(hook: HookName, invocations: CliInvocation[], value: Partial<Ada
  * pass through the platform's input; all stateful work remains in the CLI.
  */
 export function createCliAgentAdapter(options: AdapterOptions): AgentAdapter {
-  const executable = options.executable ?? "task-sync";
+  // Allow bundled hooks and constrained installations to point at a local CLI
+  // while preserving the normal PATH-based `task-sync` default.
+  const executable = options.executable ?? (process.env.TASK_SYNC_CLI_PATH?.trim() || "task-sync");
 
   async function execute(invocation: CliInvocation): Promise<CliResult> {
     return options.executor.run(invocation);
