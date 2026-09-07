@@ -47,7 +47,6 @@ PowerShell 的 `Get-FileHash` 输出必须与 `SHA256SUMS.txt` 中的摘要一�
 ### 2.3 安装后冒烟
 
 ```bash
-task-sync --help
 task-sync doctor --json
 task-sync-adapter-codex session_start <<'JSON'
 {"cwd":"/path/to/your/repository"}
@@ -107,7 +106,8 @@ task-sync sync
 task-sync status
 task-sync context task-1 --format markdown
 task-sync handoff check task-1 --json
-task-sync handoff accept task-1 <handoff-id> --yes
+HANDOFF_ID="从上一步输出复制的 handoff ID"
+task-sync handoff accept task-1 "$HANDOFF_ID" --yes
 task-sync checkpoint --task task-1 \
   --summary "已恢复并开始继续" \
   --current-focus "完成剩余实现" \
@@ -127,7 +127,7 @@ task-sync sync
 3. 下载新版本 tarball，先按第 2 节校验 SHA-256，再执行 `npm install --global ./agent-task-sync-<version>.tgz`。
 4. 更新同一版本的 canonical Skill：复制 `skills/agent-task-sync` 目录，目录名保持 `agent-task-sync`。
 5. 更新 Codex、Claude Code、Pi 适配器配置；适配器只桥接生命周期，不能复制事件存储或 reducer。
-6. 在一台设备依次运行 `task-sync doctor`、`status --json`、`context <task-id> --format markdown` 和 `handoff check <task-id>`。
+6. 在一台设备依次运行 `task-sync doctor`、`status --json`、`context task-1 --format markdown` 和 `handoff check task-1`（将 `task-1` 替换为实际任务 ID）。
 7. 完成一次小范围读写与 `task-sync sync` 后，再恢复其他设备和 Agent 的并行写入。
 
 升级期间不要让旧 CLI 和新 CLI 并行写同一个状态分支。升级不会修改代码 checkout；如果校验、协议或恢复失败，停止写入并按第 5 节回滚。
@@ -142,7 +142,7 @@ task-sync sync
 npm install --global ./agent-task-sync-<previous-version>.tgz
 task-sync doctor --json
 task-sync status --json
-task-sync context <task-id> --format markdown
+task-sync context task-1 --format markdown
 ```
 
 不要删除事件、手工拼接 JSONL 或使用 `git push --force`。只要状态仍为 v1，旧版本可以继续读取和写入。
@@ -153,8 +153,8 @@ task-sync context <task-id> --format markdown
 
 ```bash
 task-sync doctor
-task-sync rebuild <task-id>
-task-sync context <task-id> --format markdown
+task-sync rebuild task-1
+task-sync context task-1 --format markdown
 ```
 
 `rebuild` 只从 JSONL 事实重建 YAML/Markdown；若事件本身未知或损坏，不要用旧 CLI 强行吞掉，保留原始文件并登记问题。
