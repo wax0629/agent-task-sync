@@ -80,32 +80,10 @@ export class FileGitSyncPort implements GitSyncPort {
   }
 
   async status(): Promise<GitSyncStatus> {
-    await this.initializeUnlocked();
-    const localEventCount = await countEventLines(this.stateDirectory);
-    const remote = await this.remoteAvailable();
-    let localAhead = false;
-    let remoteAhead = false;
-    if (remote) {
-      const comparison = await this.run(["rev-list", "--left-right", "--count", `${this.stateBranch}...${this.remoteName}/${this.stateBranch}`], this.worktreePath, "status");
-      if (comparison.exitCode === 0) {
-        const [left, right] = comparison.stdout.trim().split(/\s+/).map((value) => Number(value));
-        localAhead = left > 0;
-        remoteAhead = right > 0;
-      }
-    }
-    const conflict = await this.hasTextConflict();
-    return {
-      localEventCount,
-      remoteEventCount: undefined,
-      localAhead,
-      remoteAhead,
-      conflict,
-      lastSyncedAt: this.lastSyncedAt,
-      repoId: this.repoId,
-      stateBranch: this.stateBranch,
-      worktreePath: this.worktreePath,
-      stateDirectory: this.stateDirectory
-    };
+    return withSyncLock({ ...this.lockOptions(), waitForLockMs: 5_000 }, async () => {
+      await this.initializeUnlocked();
+      return this.statusUnlocked();
+    });
   }
 
   async pull(): Promise<PullResult> {

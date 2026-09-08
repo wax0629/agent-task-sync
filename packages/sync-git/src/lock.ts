@@ -7,6 +7,8 @@ export interface SyncLockOptions {
   deviceId: string;
   ttlMs?: number;
   now?: () => number;
+  waitForLockMs?: number;
+  waitIntervalMs?: number;
 }
 
 interface LockRecord {
@@ -19,16 +21,26 @@ interface LockRecord {
 export async function withSyncLock<T>(options: SyncLockOptions, operation: () => Promise<T>): Promise<T> {
   const now = options.now ?? Date.now;
   const ttlMs = options.ttlMs ?? 30_000;
+  const waitForLockMs = Math.max(0, options.waitForLockMs ?? 0);
+  const waitIntervalMs = Math.max(1, options.waitIntervalMs ?? 25);
+  const waitStartedAt = now();
   await mkdir(dirname(options.lockPath), { recursive: true });
   let handle;
-  try {
-    handle = await open(options.lockPath, "wx", 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const stale = await isStale(options.lockPath, now());
-    if (!stale) throw new SyncLockError(options.lockPath);
-    await rm(options.lockPath, { force: true });
-    handle = await open(options.lockPath, "wx", 0o600);
+  while (!handle) {
+    try {
+      handle = await open(options.lockPath, "wx", 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const stale = await isStale(options.lockPath, now());
+      if (stale) {
+        await rm(options.lockPath, { force: true });
+        continue;
+      }
+      const waitedMs = now() - waitStartedAt;
+      if (waitedMs >= waitForLockMs) throw new SyncLockError(options.lockPath);
+      const remainingMs = waitForLockMs - waitedMs;
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(waitIntervalMs, remainingMs)));
+    }
   }
 
   const record: LockRecord = {

@@ -135,6 +135,41 @@ async function repositoryFixture(): Promise<RepositoryFixture> {
   return { root, remote, mac, windows };
 }
 
+test("compiled session start hooks tolerate concurrent first-time state worktree initialization", async () => {
+  const fixture = await repositoryFixture();
+  const stateWorktree = join(fixture.root, "mac-state");
+  const hooks = [
+    [fileURLToPath(new URL("../../../adapters/codex/dist/hook.js", import.meta.url)), "codex"],
+    [fileURLToPath(new URL("../../../adapters/claude-code/dist/hook.js", import.meta.url)), "claude-code"],
+    [fileURLToPath(new URL("../../../adapters/pi/dist/hook.js", import.meta.url)), "pi"]
+  ] as const;
+  try {
+    json(await runCli(fixture.mac, stateWorktree, "mac", "init", "my-project", "Agent Task Sync", "--json"), "Mac init");
+    await git(fixture.mac, "worktree", "remove", stateWorktree);
+
+    const results = await Promise.all(hooks.map(([entrypoint, agentId]) => runCompiledHook(
+      entrypoint,
+      "session_start",
+      fixture.mac,
+      JSON.stringify({
+        cwd: fixture.mac,
+        environment: {
+          TASK_SYNC_WORKTREE_PATH: stateWorktree,
+          TASK_SYNC_DEVICE_ID: "mac",
+          TASK_SYNC_SESSION_ID: `${agentId}-session`
+        }
+      })
+    )));
+    const outputs = results.map((result, index) => hookJson<{ continue: true; warning?: string; output?: string }>(result, `${hooks[index]?.[1] ?? "hook"} session start`));
+    for (const output of outputs) {
+      assert.equal(output.continue, true);
+      assert.doesNotMatch(`${output.warning ?? ""}\n${output.output ?? ""}`, /Git initialize failed|already exists/);
+    }
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("CLI completes a dual-device continuation flow through a real Git remote", async () => {
   const fixture = await repositoryFixture();
   const macState = join(fixture.root, "mac-state");

@@ -170,9 +170,12 @@ export class ApplicationService implements TaskSyncService {
   }
 
   async status(): Promise<ProjectStatus> {
+    const sync = await this.dependencies.sync.inspect();
+    // A Git-backed status call may create the shared state worktree on its
+    // first read. Inspect it before reading the registry so concurrent Agent
+    // starts do not observe a transiently missing project manifest.
     const project = await this.dependencies.registry.current();
     const events = await this.dependencies.events.readProjectEvents(project?.projectId);
-    const sync = await this.dependencies.sync.inspect();
     const tasks = this.reduceTasks(events).map((state) => this.withSyncSummary(state, sync));
     const semanticConflict = tasks.some((state) => state.conflicts.some((conflict) => !conflict.resolved));
     const effectiveSync = semanticConflict ? { ...sync, conflict: true } : sync;

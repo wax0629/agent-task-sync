@@ -86,6 +86,26 @@ async function deviceFixture(repoRoot: string, remote: string, worktreePath: str
   return { app, events, runner, sync, root };
 }
 
+test("concurrent status calls share one first-time state worktree initialization", async () => {
+  const fixture = await repositoryFixture();
+  const stateWorktree = join(fixture.root, "mac-state");
+  try {
+    const ports = ["codex", "pi"].map((deviceId) => new FileGitSyncPort({
+      repoRoot: fixture.mac,
+      project: { remoteUrl: fixture.remote, defaultBranch: "main" },
+      worktreePath: stateWorktree,
+      deviceId
+    }));
+
+    const statuses = await Promise.all(ports.map((port) => port.status()));
+    assert.equal(statuses.length, 2);
+    assert.equal(statuses.every((status) => status.stateDirectory === join(stateWorktree, ".task-sync")), true);
+    assert.match(await git(fixture.mac, "worktree", "list", "--porcelain"), /branch refs\/heads\/task-sync\/state/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 function actor(agentId: string, deviceId: string): Actor {
   return { agentId, deviceId, sessionId: `${deviceId}-session`, confirmed: true };
 }
